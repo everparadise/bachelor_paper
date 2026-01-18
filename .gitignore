@@ -1,0 +1,38 @@
+# =====================
+# LaTeX build files
+# =====================
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+
+# BibLaTeX / Biber
+*.bbl
+*.bcf
+*.blg
+*.run.xml
+
+# Output files
+*.pdf
+*.ps
+*.dvi
+
+# Temporary / backups
+*~
+*.bak
+*.tmp
+
+# VS Code
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
