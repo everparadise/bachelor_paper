@@ -1,0 +1,228 @@
+% !TEX root = ../main.tex
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 第五章：实验评估
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{实验评估}
+\label{ch:evaluation}
+
+本章通过端到端实验评估本文在线推理模拟器与预测驱动调度策略的有效性，并验证预测模块的在线可用性。
+实验重点围绕 PD 共置（Prefill/Decode colocation, mixed batch）场景展开：在该场景中 Prefill 与 Decode 在同一实例竞争资源，
+混合批的组成与节奏随时间变化，简单负载指标往往难以稳定刻画实例可服务能力，因此更需要在线预测信号辅助全局调度决策。
+本章主要回答以下问题：
+
+\begin{itemize}
+  \item \textbf{Q1：}基于在线模拟器预测的调度策略，相比简单指标调度能否改善端到端 TTFT（尤其尾延迟）与吞吐？
+  \item \textbf{Q2：}预测模块的吞吐与延迟是否满足在线调度需求？是否会成为调度关键路径瓶颈？
+  \item \textbf{Q3：}同步闭环与实现优化（pattern-level、prediction reuse）在系统中是否必要？它们带来怎样的收益？
+  \item \textbf{Q4（可选）：}跨预测表/跨模型查表时，预测信号的排序一致性如何？为何 mean 变化小但 tail 更敏感？
+\end{itemize}
+
+\section{实验设置}
+\label{sec:exp_setup}
+
+\subsection{硬件与软件环境}
+\label{sec:env}
+
+实验在两类 GPU 集群上进行（均为 8 卡单机或 8 卡同构节点配置，依据你的实际环境填写，TODO）：
+\begin{itemize}
+  \item \textbf{H20 集群：}8$\times$ NVIDIA H20，CPU/内存/网络配置（TODO）
+  \item \textbf{H100 集群：}8$\times$ NVIDIA H100，CPU/内存/网络配置（TODO）
+\end{itemize}
+
+推理运行时采用 vLLM（版本 TODO），部署形态为 PD 共置 mixed batch（即 Prefill 与 Decode 在同一实例中混合执行）。
+全局调度器与在线模拟器部署在调度节点（或与入口服务共置，TODO），候选实例预测采用并行方式执行（线程池/协程/进程池，TODO）。
+
+\subsection{模型与工作负载}
+\label{sec:workload}
+
+实验模型配置包括：
+\begin{itemize}
+  \item \textbf{Dense：}Qwen2.5-7B（TODO: 精确版本与量化/并行配置）
+  \item \textbf{MoE：}Qwen3-30B-A3B（TODO）
+  \item （可选探索）更大规模模型，如 Qwen3-235B（TODO: 若有则说明条件与限制）
+\end{itemize}
+
+工作负载覆盖对话、代码与智能体三类典型场景（来源与采集方式 TODO）：
+\begin{itemize}
+  \item Qwen Chatbot trace（TODO）
+  \item Qwen Coder trace（TODO）
+  \item Qwen Agent / ToolAgent trace（TODO）
+\end{itemize}
+
+为模拟在线到达过程，我们使用两类到达模式（按你实际采用的方式保留其一或两者，TODO）：
+\begin{itemize}
+  \item \textbf{稳态到达：}近似固定速率或泊松过程
+  \item \textbf{突发到达：}burst（例如 ON/OFF 或短时间高峰注入）
+\end{itemize}
+
+\subsection{评价指标}
+\label{sec:metrics}
+
+本文主要评价指标为：
+\begin{itemize}
+  \item \textbf{端到端 TTFT：}mean / p95 / p99（必要）
+  \item \textbf{吞吐：}系统稳定吞吐（QPS）与有效完成请求数（必要）
+  \item \textbf{TTFT SLO 违约率（可选）：} $\Pr[\mathrm{TTFT}>\tau]$，其中 $\tau$ 为 TTFT 阈值（TODO）
+  \item \textbf{预测模块开销：}预测吞吐（predictions/sec 或 requests/sec）、预测延迟（mean/p95/p99）
+\end{itemize}
+
+\section{对比方法与实现版本}
+\label{sec:baselines}
+
+\subsection{调度策略对比}
+\label{sec:schedulers}
+
+我们对比以下全局调度策略（根据你实验实际选择保留，TODO）：
+
+\textbf{(1) 简单指标基线（Metric-based baseline）}：
+例如最短队列（queue length）、最小 backlog tokens、轮询（round-robin）等。
+该类策略不依赖在线预测模块，易实现但难刻画 mixed batch 场景的真实服务能力。
+
+\textbf{(2) 预测驱动策略（Predictive scheduling）}：
+本文方法。对每个候选实例调用在线模拟器得到 $\widehat{\mathrm{TTFT}}$（以及可选风险项），并据此选择最优实例。
+若本文实现为“预测 + 简单指标混合”，请给出 score 公式（TODO），并在实验中讨论混合权重敏感性（可选）。
+
+\textbf{(3) 系统/框架对比（可选）}：
+若你在实验中对比 vLLM-v1、NVIDIA Dynamo、llm-d 等系统的默认策略，请说明其版本与配置（TODO），并确保对比条件尽可能一致。
+
+\subsection{在线模拟器实现版本}
+\label{sec:sim_versions}
+
+为验证设计选择的必要性，本章使用第~\ref{ch:sim_impl}~章中的实现版本进行对比：
+\begin{itemize}
+  \item \textbf{V1：Full-fidelity reference}（用于开销归因，不作为端到端 baseline）
+  \item \textbf{V3：Lightweight w/o reuse}（KVCache 外包 + pattern-level scheduling）
+  \item \textbf{V2：Lightweight w/ reuse}（在 V3 基础上加入 prediction reuse，作为默认部署版本）
+\end{itemize}
+注：版本编号可按你实际工程定义调整（TODO）。
+
+\section{端到端结果：预测驱动调度的收益}
+\label{sec:e2e_results}
+
+本节回答 Q1：预测驱动调度是否改善端到端服务质量？
+我们在不同模型、不同负载与不同硬件环境下对比调度策略，报告 TTFT 与吞吐的变化。
+
+\subsection{稳态负载下的 TTFT 与吞吐}
+\label{sec:steady}
+
+图~\ref{fig:e2e_ttft} 展示了在稳态到达下，各策略的 TTFT（mean/p95/p99）对比结果（TODO: 补图）。
+总体上，预测驱动策略在 PD 共置 mixed batch 场景下能够更准确地选择“更快获得可执行 prefill 机会”的实例，
+从而降低 TTFT，尤其在高负载时对 p95/p99 的改善更显著（TODO: 用你的数据填充结论）。
+
+图~\ref{fig:e2e_tput} 展示了系统吞吐（QPS）对比（TODO: 补图/表）。
+预测驱动策略在不降低吞吐的前提下改善 TTFT，或在部分场景同时提升吞吐与 TTFT（取决于你的结果，TODO）。
+
+\subsection{突发负载下的尾延迟与稳定性}
+\label{sec:burst}
+
+PD 共置 mixed batch 对突发到达更敏感：短时间大量 prefill 请求会与 decode 运行集合竞争资源，
+导致 TTFT tail 放大。
+图~\ref{fig:e2e_burst} 展示 burst 场景下各策略的 TTFT tail 与（可选）SLO 违约率对比（TODO）。
+结果表明，预测驱动策略通过更准确地规避拥塞实例，能够降低突发下的 p99 与违约风险（TODO：用数据支撑）。
+
+
+\section{在线可用性：预测模块吞吐与延迟}
+\label{sec:online_budget}
+
+本节回答 Q2：预测模块是否满足在线调度需求？
+
+\subsection{预测吞吐与延迟统计}
+\label{sec:pred_perf}
+
+我们测量预测模块的处理能力，包括：
+(1) 单次 \texttt{Predict} 的延迟（mean/p95/p99）；
+(2) 在并发请求到达下的预测吞吐（predictions/sec 或 requests/sec）；
+(3) 预测开销在调度关键路径中的占比（若可测，TODO）。
+
+表~\ref{tab:pred_perf} 总结了预测模块性能（TODO: 填数值）。
+总体结果显示，轻量在线模拟器（pattern-level + runtime-assisted）能够在高并发下保持稳定吞吐，
+不会成为调度瓶颈（TODO: 结合你系统目标 QPS 说明）。
+
+\begin{table}[t]
+  \centering
+  \caption{预测模块在线性能（TODO：填入不同版本/不同硬件上的 QPS 与延迟）。}
+  \label{tab:pred_perf}
+  \begin{tabular}{lccc}
+    \toprule
+    设置 & 预测吞吐（/s） & p95 延迟（$\mu$s/ms） & p99 延迟（$\mu$s/ms） \\
+    \midrule
+    V1 Full-fidelity & TODO & TODO & TODO \\
+    V3 Lightweight w/o reuse & TODO & TODO & TODO \\
+    V2 Lightweight w/ reuse & TODO & TODO & TODO \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{消融实验：同步机制与实现优化的必要性}
+\label{sec:ablation}
+
+本节回答 Q3：同步闭环与优化选择是否必要？
+考虑到本科毕设篇幅，本节提供两类低成本且与贡献紧密相关的消融实验；你可根据已有数据保留其中一类或两类。
+
+\subsection{同步闭环的必要性（建议保留）}
+\label{sec:sync_ablation}
+
+我们比较以下两种设置（TODO：根据实现情况调整）：
+\begin{itemize}
+  \item \textbf{Full-Sync：}每个 batch 完成后上报 \texttt{batch\_trace} 并修正 $S^{gt}$（默认）
+  \item \textbf{No-Sync：}禁用 \texttt{SyncBatchResult}，模拟器仅靠自身推进（或使用固定背景负载），观察漂移
+\end{itemize}
+
+图~\ref{fig:sync_drift} 展示预测误差或端到端 TTFT tail 随时间的变化（TODO）。
+结果通常表现为：No-Sync 会产生累积漂移，导致预测失真并损害调度收益；Full-Sync 能将漂移控制在可接受范围内。
+
+\subsection{prediction reuse 的影响（建议保留）}
+\label{sec:reuse_ablation}
+
+我们在相同调度策略与相同 workload 下，对比 Lightweight w/ reuse（V2）与 w/o reuse（V3）：
+尽管端到端吞吐可能受其他模块瓶颈限制而近似不变，
+prediction reuse 仍可显著降低预测延迟分位数（例如 p99），并减少预测侧 CPU 压力（若可测，TODO）。
+图~\ref{fig:reuse_latency} 给出了 V2 与 V3 的预测延迟对比（TODO），用于支持实现章节中的结论。
+
+\section{现象分析（可选）：跨预测表的排序一致性}
+\label{sec:crosstable}
+
+本节用于解释你已观察到的现象：使用不同模型/不同预测表进行调度，mean TTFT 变化不大，但 p95/p99 差异更明显。
+由于在线调度主要依赖“实例间相对优劣”的比较，而非绝对值精确，
+我们用 Spearman 秩相关系数衡量两张预测表在候选实例排序上的一致程度。
+
+\subsection{Spearman 秩相关与选择一致率}
+\label{sec:spearman}
+
+对于每个请求 $r$，我们记录候选实例集合 $\mathcal{I}$ 上两张预测表输出的实例评分序列 $\{s_A(r,i)\}$ 与 $\{s_B(r,i)\}$（本文默认 $s=\widehat{\mathrm{TTFT}}$）。
+将评分转为排序后计算 Spearman 相关系数 $\rho(r)$，并统计全体请求的平均/分位数（TODO: 公式可简述）。
+同时，我们计算两张预测表的 Top-1 选择一致率：
+\[
+\mathrm{Agree@1} = \frac{1}{|R|}\sum_{r\in R} \mathbb{1}\Big[\arg\min_i s_A(r,i) = \arg\min_i s_B(r,i)\Big]
+\]
+表~\ref{tab:crosstable} 给出统计结果（TODO）。
+
+\begin{table}[t]
+  \centering
+  \caption{跨预测表一致性分析（TODO：填 Spearman 与 Agree@1；可再给 tail 子集统计）。}
+  \label{tab:crosstable}
+  \begin{tabular}{lcc}
+    \toprule
+    指标 & 全体请求 & tail 子集（例如 TTFT top 10\%） \\
+    \midrule
+    Spearman $\rho$（均值/中位数） & TODO & TODO \\
+    Agree@1 & TODO & TODO \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{讨论：为何 tail 更敏感}
+\label{sec:tail_sensitive}
+
+当系统处于拥塞区间或 mixed batch 的竞争更激烈时，
+不同预测表之间的绝对误差与排序误差更容易导致“边界实例”发生选择翻转，从而主要体现在 tail（p95/p99）差异上。
+这一现象提示：在 PD 共置场景中，预测表的可迁移性对均值可能更鲁棒，但对尾部质量仍需谨慎评估（TODO: 结合你的数据做出结论）。
+
+\section{本章小结}
+\label{sec:eval_summary}
+
+本章在 PD 共置 mixed batch 场景下验证了在线模拟器预测信号对全局调度的端到端收益，
+并评估了预测模块的在线可用性。
+实验结果表明：预测驱动调度能够在保持吞吐的同时改善 TTFT（尤其尾延迟），
+轻量在线模拟器满足在线开销预算；同步机制与 prediction reuse 等优化能够进一步提升系统的稳定性与可部署性（TODO: 用数据回扣结论）。

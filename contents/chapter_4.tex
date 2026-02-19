@@ -1,0 +1,124 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 第四章：实现与优化（从不可行到可用）
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{实现与优化：从不可行到可用}
+\label{ch:sim_impl}
+
+本章介绍在线推理模拟器的实现细节与关键优化过程。
+我们的实现目标是：在不显著增加在线调度关键路径延迟的前提下，
+为每个到达请求提供多实例 TTFT 预测信号，并通过同步机制维持预测有效性。
+实践表明，直接将离线模拟器的 full-fidelity 设计搬到在线路径会导致预测吞吐不足；
+因此我们采用轻量化状态抽象与预测复用等方法，使预测模块能够满足在线调度需求。
+
+\section{实现概述}
+\label{sec:impl_overview}
+
+在线模拟器部署在全局调度器侧，为每个推理实例维护一份模拟状态副本。
+当请求到达时，全局调度器并行调用多个实例模拟器的 \texttt{Predict} 得到 $\widehat{\mathrm{TTFT}}$ 等指标并完成路由决策；
+路由完成后通过 \texttt{EnqueueRequest} 写入目标实例状态。
+同时，实例调度器在每个 batch 完成后上报 \texttt{SyncBatchResult}，用于修正 $S^{gt}$ 并更新模式信息。
+
+本文实现以 PD 共置 mixed batch 场景为主要目标：Prefill 与 Decode 在同一实例混合执行，TTFT 对 batch 模式和队列演化敏感。
+因此在线预测模块不仅要快，还要能在状态漂移存在时通过同步保持可用。
+
+\section{Full-fidelity 参考实现与瓶颈}
+\label{sec:full_fidelity_ref}
+
+\subsection{设计动机：语义对齐与开销归因}
+\label{sec:ref_motivation}
+
+我们首先实现一个 full-fidelity 的参考模拟器（reference implementation），尽可能复刻运行时（如 vLLM）的关键行为：
+(1) KVCache block 级分配与回收（allocate/evict）；
+(2) request-level 的 waiting/running 队列维护；
+(3) 与运行时一致的实例调度逻辑，用于逐步构造 batch；
+(4) 每次预测从当前 $S^{gt}$ fork 出独立状态进行反事实推进，避免污染基准状态。
+
+该参考实现用于验证模拟器语义正确性与定位开销来源，
+\textbf{但并不作为后续端到端调度对比的 baseline}。
+这是因为其设计目标偏向“精细复刻”，而在线调度路径需要“低开销可用”的预测信号。
+
+\subsection{瓶颈分析：在线不可用}
+\label{sec:ref_bottleneck}
+
+实验表明，full-fidelity 参考实现的预测吞吐难以满足在线调度需求（TODO: 给出测得 QPS 与在线需求对比）。
+主要原因包括：
+
+\textbf{(1) 预测开销与 backlog 强相关。}
+request-level 构批需要遍历 waiting/running 队列并模拟多步推进，
+当实例 backlog 堆积时，每次预测会重复执行大量相同的队列扫描与调度逻辑，导致计算开销显著上升。
+
+\textbf{(2) KVCache 细粒度管理常数开销大。}
+block 级分配/回收涉及复杂数据结构与一致性维护，
+在在线预测中复刻该逻辑会引入较高常数开销，与“毫秒级在线预算”不匹配。
+
+\textbf{(3) fork 与状态复制成本。}
+为确保多候选预测相互独立，参考实现每次 \texttt{Predict} 都会 fork 完整状态，
+在高并发预测调用下，该复制成本进一步放大。
+
+这些现象表明：若坚持 full-fidelity 复刻，在线预测将成为调度关键路径瓶颈。
+因此，我们需要在“复刻精度”与“在线可用性”之间做出权衡，并通过同步闭环控制误差。
+
+\section{轻量实现：runtime-assisted + pattern-level scheduling}
+\label{sec:lightweight_impl}
+
+\subsection{设计原则}
+\label{sec:lightweight_principles}
+
+轻量实现围绕两个原则展开：
+
+\textbf{原则1：将与运行时强耦合、常数开销大的细节外包给运行时上报。}
+典型代表是 KVCache block 级管理：由运行时维护最准确，也最节省模拟器开销。
+模拟器只消费必要的摘要信息与批次模式（pattern），避免在预测路径中复刻复杂逻辑。
+
+\textbf{原则2：将状态粒度提升到 batch/pattern 层面，避免 request-level 遍历构批。}
+在 PD 共置 mixed batch 场景下，TTFT 的核心在于“新请求何时进入某个可执行 batch”以及该 batch 的 prefill 负载。
+因此我们以最近 batch 的模式与队列摘要来驱动短视窗预测，避免在每次预测时遍历队列并重算 batch 构造过程。
+
+\subsection{pattern-level scheduling 的实现}
+\label{sec:pattern_scheduling_impl}
+
+在轻量实现中，实例模拟器维护最近 batch 的 \texttt{pattern}（例如 prefill/decode 长度）与逻辑时钟，
+并用查表/性能模型估计下一批的执行耗时（预测器细节本文参考 Vidur，TODO: 简述查表维度）。
+当新请求到达时，模拟器不再重构完整 waiting/running 队列，而是在当前模式基础上估计该请求被并入 batch 的时刻与 prefill 负载，
+从而得到 $\widehat{\mathrm{TTFT}}$。
+
+该过程的关键是：预测复杂度不再随 backlog 线性增长，而近似为常数（或与少量统计桶数相关，取决于 \texttt{queue\_summary} 的实现，TODO）。
+这一设计使预测模块能够在高并发下保持稳定吞吐。
+
+\section{Prediction reuse：减少重复推演}
+\label{sec:prediction_reuse}
+
+\subsection{重复计算的来源}
+\label{sec:reuse_motivation}
+
+在在线系统中，请求往往密集到达。
+若每个新请求到达都从 $S^{gt}$ 出发重新推进预测，会导致对 backlog 的调度与模式演化被反复计算。
+特别是在 waiting backlog 较大时，相邻请求的预测共享大量相同的“历史推进轨迹”，全量重算属于重复开销。
+
+\subsection{复用策略}
+\label{sec:reuse_method}
+
+为减少重复推演，我们引入 prediction reuse：
+对每个实例维护一个“预测前沿状态”（predicted frontier），表示上一次预测推进后的末状态。
+当新请求到达时，模拟器从该前沿状态继续推进增量预测，而非从 $S^{gt}$ 重算完整 backlog。
+当收到 \texttt{SyncBatchResult} 时，模拟器以实例上报为准修正 $S^{gt}$，
+并在必要时重置预测前沿（例如 batch\_id 不连续或差异超过阈值，TODO）。
+
+该策略在不改变最终预测语义的前提下显著减少了重复计算，降低了单次预测延迟与 CPU 开销。
+
+\subsection{收益定位：控制面延迟与鲁棒性}
+\label{sec:reuse_value}
+
+需要注意的是，系统端到端吞吐瓶颈可能位于请求分发、网络传输或实例执行等路径，
+因此 prediction reuse 不一定在整体 QPS 上体现为线性提升。
+但由于候选实例预测通常并行执行，调度决策的关键路径更受最慢预测任务与预测服务排队影响。
+prediction reuse 通过降低预测任务的计算开销与抖动，有助于降低调度控制面的尾部延迟，
+在突发负载或 CPU 紧张时提升系统鲁棒性（第~\ref{ch:evaluation}~章将给出对比结果，TODO: 对应图表）。
+
+\section{小结：三版本实现对比与实践结论}
+\label{sec:impl_summary}
+
+综上，我们以 full-fidelity 参考实现验证语义并定位瓶颈，发现其在线不可用；
+随后通过 runtime-assisted 的 KVCache 外包与 pattern-level scheduling 将预测复杂度降至近似常数，实现在线可用的预测吞吐；
+在此基础上引入 prediction reuse 进一步减少重复推演，降低预测延迟与抖动。
+在实验章节中，我们将展示三种实现的预测性能对比（预测 QPS、预测延迟分位数），并评估其对端到端调度效果的影响（TODO: 引用实验图表）。

@@ -1,69 +1,170 @@
 % !TEX root = ../main.tex
 
-\chapter{图表、公式格式}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% 第三章：在线推理模拟器设计
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{在线推理模拟器的设计}
+\label{ch:sim_design}
 
-\section{图表格式}
-\begin{figure}[!htp]
-  \centering
-  \includegraphics[width=8cm]{figures/energy.png} 
-  \caption{内热源沿径向的分布}
-  \label{fig:energy}
-\end{figure}
+本章给出在线推理模拟器在全局调度场景中的语义、接口与状态抽象，并说明为何在线场景必须引入同步闭环以避免预测漂移。
+与离线模拟器“给定 workload 离线推进并输出整体指标”的语义不同，在线模拟器嵌入全局调度路径，
+其核心任务是：在请求到达时，基于每个推理实例的当前状态对候选实例进行\emph{反事实性能预测}，
+输出用于比较的关键指标（本文主要关注 $\widehat{\mathrm{TTFT}}$ 与可选的 TTFT SLO 风险）来指导路由决策。
+整体架构如图~\ref{fig:online-sim-arch} 所示（TODO: 绘制系统框图）。
 
-\begin{figure}[!hbtp]
-  \centering
-  \subcaptionbox{健康/损伤信号}%
-                [7cm]{\includegraphics[height=6cm]{figures/signal_1.png}}
-  \hspace{1cm}
-  \subcaptionbox{散射信号}%
-                [7cm]{\includegraphics[height=6cm]{figures/signal_2.png}}
-  \caption{响应信号处理}
-  \label{fig:bisubcaptionbox}
-\end{figure}
+\section{在线语义与接口}
+\label{sec:sim_api}
 
-\begin{ThreePartTable}
-  \begin{longtable}[c]{*{4}{c}}
-    \caption{高频感应加热的基本参数}
-    \label{tab:data} \\
-    \toprule
-    \multicolumn{1}{c}{感应频率} &
-    \multicolumn{1}{c}{感应发生器功率} &
-    \multicolumn{1}{c}{工件移动速度} &
-    \multicolumn{1}{c}{感应圈与零件间隙} \\
-    \multicolumn{1}{c}{(kHz)} &
-    \multicolumn{1}{c}{(\% ×80kW)} &
-    \multicolumn{1}{c}{(mm/min)} &
-    \multicolumn{1}{c}{(mm)} \\
-    \midrule
-    \endfirsthead
+\subsection{从离线事件循环到在线反事实预测}
+\label{sec:offline_vs_online_sim}
 
-    \multicolumn{4}{l}{\textbf{续表~\thetable}} \\
-    \toprule
-    \multicolumn{1}{c}{感应频率} &
-    \multicolumn{1}{c}{感应发生器功率} &
-    \multicolumn{1}{c}{工件移动速度} &
-    \multicolumn{1}{c}{感应圈与零件间隙} \\
-    \multicolumn{1}{c}{(kHz)} &
-    \multicolumn{1}{c}{(\% ×80kW)} &
-    \multicolumn{1}{c}{(mm/min)} &
-    \multicolumn{1}{c}{(mm)} \\
-    \midrule
-    \endhead
+离线推理模拟器通常在启动时指定系统配置与完整 workload trace，通过事件循环推进系统状态：
+请求到达、排队、实例内调度构造 batch、执行、状态更新，最终离线得到吞吐、尾延迟、资源利用率等统计指标。
+该范式隐含两个特性：其一，状态推进是由模拟器完全决定、线性且可重复；其二，不需要与真实系统对齐。
 
-    \bottomrule
-    \endfoot
+在线调度场景的语义不同。全局调度器需要在每个请求到达时对多个候选实例进行比较，
+因此在线模拟器的核心接口是：\emph{给定请求 $r$ 与实例 $i$ 的当前状态，预测 $r$ 若被路由到 $i$ 时的 TTFT 等指标}。
+在线模拟器不需要重放完整时间线，而是围绕“当前真实状态附近”的局部预测提供决策信号。
 
-    250 & 88 & 5900 & 1.65 \\
-    250 & 88 & 5900 & 1.65 \\
-    % ... 下面数据保持不变
-  \end{longtable}
-\end{ThreePartTable}
+\subsection{模拟器模块接口定义}
+\label{sec:api_loop}
 
-\section{公式格式}
-\begin{equation}
- \frac{1}{\mu} \nabla^{2} \mathbf{A}-j \omega \sigma \mathbf{A}-\nabla\left(\frac{1}{\mu}\right) \times(\nabla \times \mathbf{A})+\mathbf{J}_{0}=0
-\end{equation}
+为了保证在线预测长期有效，在线模拟器需要与真实推理实例进行状态同步，
+本文采用“确认请求指派 + 步进状态更新”的方式完成，接口设计如下（图~\ref{fig:sim_api_flow}，TODO: 绘制接口数据流）：
 
+\paragraph{(1) 请求写入：CommitRequest}
+全局调度器在完成路由决策后，确认对应实例的模拟器状态更新：
+\begin{verbatim}
+CommitRequest(instance_id, request)
+\end{verbatim}
+其中 \texttt{request} 包含：
+
+\paragraph{(2) 性能预测：Predict}
+在线模拟器在实例 $i$ 上对请求 $r$ 的候选执行表现进行预测：
+\begin{verbatim}
+Predict(instance_id, request) -> metrics
+\end{verbatim}
+返回的 \texttt{metrics} 以在线调度需求为中心，本文主要使用：
+\[
+\widehat{\mathrm{TTFT}}(r,i), \quad \widehat{\Pr}[\mathrm{TTFT}(r,i)>\tau]~(\text{可选})
+\]
+其中 $\tau$ 为 TTFT SLO 阈值（若系统不使用概率风险项，可在实现中令 $\lambda=0$，仅使用 $\widehat{\mathrm{TTFT}}$）。
+
+\paragraph{(3) 状态同步：Sync}
+实例调度器在每次批处理完成后向全局调度器上报批处理轨迹与状态更新信息，
+以便在线模拟器纠正漂移并更新实例基准状态：
+\begin{verbatim}
+SyncBatchResult(instance_id, batch_trace)
+\end{verbatim}
+本文将 \texttt{batch\_trace} 作为“可扩展”的状态同步载体。
+考虑到不同运行时/调度器实现差异，本文只假设其包含最小必要字段（其余字段预留为 TODO，后续可扩展）：
+\begin{itemize}
+  \item \texttt{batch\_id}：单调递增的批次编号（用于对齐与幂等处理，TODO: 具体实现）
+  \item \texttt{t\_start, t\_end} 或 \texttt{duration}：批次执行时间信息
+  \item \texttt{pattern}：批次的关键结构特征，例如 \texttt{prefill\_len} 与 \texttt{decode\_len}（本文的轻量抽象依赖该项）
+  \item \texttt{completed}：完成请求集合或完成数量（TODO: 选择集合或数量）
+  \item 预留：抢占/取消/重排事件、KVCache 资源摘要等（TODO: 后续补充）
+\end{itemize}
+
+\noindent
+以上三个接口形成在线闭环：调度器写入动作 $\rightarrow$ 模拟器预测 $\rightarrow$ 真实执行 $\rightarrow$ 批边界上报 $\rightarrow$ 模拟器修正状态。
+后续章节将展示该闭环在 PD 共置（mixed batch）场景下的重要性：Prefill/Decode 在同一实例竞争资源，批次结构随时间演化，
+若无同步对齐，模拟器状态会快速漂移并导致预测失真。
+
+\section{状态抽象：从 request-level 到 pattern-level}
+\label{sec:state_abstraction}
+
+\subsection{为什么离线状态管理不适用于在线}
+\label{sec:why_state_hard}
+
+离线模拟器的状态管理通常是线性的：给定确定性调度策略与输入事件序列，每一步调度决策确定性推进状态且不会回退。
+在线模拟器则面对两个额外困难：
+
+\textbf{(1) 需要重复进行多候选预测。}
+全局调度器往往需要对多个候选实例进行比较，甚至对同一实例评估不同动作（如队尾插入/优先级处理等，本文默认只评估队尾插入，TODO）。
+这要求模拟器能够在同一基准状态上进行多次反事实预测，而不能让一次预测的状态改变影响下一次预测。
+
+\textbf{(2) 必须与真实实例持续对齐。}
+在线系统是分布式的，存在通信延迟、乱序与实例侧不可见行为。
+如果模拟器状态长期不与真实实例同步，预测误差会逐渐累积，最终使预测信号失去指导意义。
+
+因此，在线模拟器需要显式区分“用于对齐真实”的基准状态与“用于反事实推进”的预测状态。
+
+\subsection{Ground-Truth State 与 Predicted State}
+\label{sec:gt_pred_state}
+
+本文将每个实例的模拟状态分为两类：
+
+\textbf{Ground-Truth State（$S^{gt}$）}：在线模拟器当前对实例真实状态的\emph{对齐估计}，
+由 \texttt{EnqueueRequest} 与 \texttt{SyncBatchResult} 驱动更新。其作用是作为后续预测的共同起点。
+
+\textbf{Predicted State（$S^{pred}$）}：在一次 \texttt{Predict} 调用中，从 $S^{gt}$ 出发做短视窗推进得到的临时状态，
+用于计算 $\widehat{\mathrm{TTFT}}$ 等指标。预测结束后该状态可以丢弃，避免污染 $S^{gt}$。
+
+这一双状态机制使在线模拟器能够对多个候选实例并行预测，同时通过批边界同步修正 $S^{gt}$ 防止长期漂移。
+
+\subsection{pattern-level 状态抽象}
+\label{sec:pattern_state}
+
+在线推理服务对预测模块的吞吐与延迟有严格预算。
+若在模拟器中完整复刻运行时的 request-level 构批过程（遍历 waiting/running 队列、模拟 KVCache block 分配/回收等），
+预测开销往往随 backlog 增长，并在高并发场景下难以满足在线要求（第~\ref{ch:sim_impl}~章给出实证）。
+
+为此，本文采用\textbf{pattern-level 状态抽象}：将模拟器内部状态管理粒度从请求级降低到批次结构级，
+仅维护对 TTFT 预测最关键的“批处理模式信息”，并将 KVCache 等细粒度资源管理外包为运行时上报（runtime-assisted reporting）。
+具体而言，每个实例维护如下信息（示意如图~\ref{fig:pattern_state}，TODO: 绘制 state 结构图）：
+\begin{itemize}
+  \item \texttt{last\_pattern}：最近一次执行 batch 的模式，例如 $(\texttt{prefill\_len}, \texttt{decode\_len})$
+  \item \texttt{last\_batch\_end\_ts}：最近一次 batch 完成时间（或逻辑时钟）
+  \item \texttt{queue\_summary}：等待请求的聚合统计（例如等待数、prompt tokens 分布等，本文实现使用 TODO）
+  \item 预留：资源摘要（KVCache 占用区间、可并入上限等，TODO）
+\end{itemize}
+
+\noindent
+该抽象的核心动机是：在 PD 共置 mixed batch 场景中，TTFT 的主要决定因素是“新请求何时能够进入某个可执行 batch”以及“该 batch 的 prefill 负载”，
+而这些信息在很大程度上可以由实例近期的 batch pattern 与队列聚合统计所刻画。
+通过 pattern-level 状态，在线模拟器可以避免每次预测时遍历并重构完整队列，从而将预测成本降至近似常数。
+
+\section{批边界同步与漂移来源分析}
+\label{sec:sync_design}
+
+\subsection{漂移来源}
+\label{sec:divergence_sources}
+
+在线模拟器与真实实例状态不一致（divergence）在离线模拟中很少出现，但在在线系统中是常态。
+本文总结两类主要漂移来源：
+
+\textbf{(1) 分布式乱序与观测滞后。}
+全局调度器与推理实例之间存在网络与并发；实例可能并行执行预处理（如分词、请求校验等，TODO: 以真实系统为准）。
+对于先后到达的两个请求，后到达的短请求可能更早进入实例等待队列，导致两侧观测到的队列顺序不同。
+在 FCFS 或近似 FCFS 的实例调度策略下，队列顺序变化会改变 batch 构造路径，进而放大为显著不同的 TTFT。
+
+\textbf{(2) 实例侧策略行为不可见。}
+实例调度器可能执行抢占、取消、优先级重排等行为来满足 SLO 或提高吞吐（TODO: 以你系统的真实行为描述）。
+这些行为若不被同步到全局调度器侧的模拟器，将导致模拟状态沿错误轨迹推进。
+
+\subsection{为何选择“批完成”为主同步点}
+\label{sec:why_batch_boundary}
+
+为在同步成本与表达能力之间取得平衡，本文选择“批处理完成”为主同步点，
+由实例调度器周期性上报 \texttt{batch\_trace}。
+选择批边界同步的原因包括：
+(1) batch 是推理执行的自然原子段，关键状态更新（队列推进、请求完成、模式变化）在批边界集中发生；
+(2) token 级事件频繁，上报开销高，且对全局调度决策的边际价值有限；
+(3) pattern-level 抽象天然以 batch 为粒度，批边界上报可以直接修正模拟器的关键状态。
+
+\subsection{同步后的状态修正（reconcile）}
+\label{sec:reconcile}
+
+同步到达后，模拟器对 $S^{gt}$ 进行强制修正，使其重新与实例对齐。
+本文实现中，\texttt{batch\_trace} 至少用于更新：最近 batch 模式、逻辑时钟、完成请求集合/数量与队列摘要（TODO: 细节）。
+当观测与预测冲突时，以实例上报为准进行覆盖，并将差异记录为误差分析数据（用于第~\ref{ch:evaluation}~章讨论）。
+该策略保证在线模拟器不会因为偶发乱序或实例侧不可见行为而长期漂移。
 
 \section{本章小结}
-本章介绍了……
+\label{sec:sim_design_summary}
+
+本章提出在线推理模拟器在全局调度场景中的语义与接口闭环：请求写入、性能预测与批边界同步，
+并给出 Ground-Truth/Predicted 双状态机制以支持多候选反事实预测。
+为满足在线预测开销预算，本文采用 pattern-level 状态抽象，并通过批边界同步修正漂移，使预测长期有效。
+下一章将给出模拟器的实现与优化过程，展示从 full-fidelity 参考实现到可部署轻量实现的演进与性能对比。

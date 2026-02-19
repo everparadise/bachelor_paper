@@ -1,0 +1,23 @@
+% !TEX root = ../main.tex
+
+\chapter{性能评估}
+本文在8× H20和8× H100的DGX节点上进行端到端请求重放测试，
+比较了基于性能预测的调度策略Mooncake-like和llm-d，以及基于简单性能指标混合的策略vLLM、和CompanyX的线上服务策略
+
+为了将现有调度策略进行公平的比较，消除不同调度系统实现对端到端性能的影响，
+本文在统一的Rust全局调度框架BlitzScale上实现不同的调度策略，框架的效率和正确性通过calibration测试保证。
+
+
+\section{端到端服务性能(TODO: 端到端性能对比图)}
+本节使用8实例的，Qwen2.5-7B和Qwen3-30B-A3B两种服务模型进行端到端测试。
+工作负载: 使用的工作负载是Qwen Coder、Qwen Chat、 Mooncake和Qwen Thinking，
+包含了不同的系统负载和不同的服务场景。
+使用Qwen Trace配套的开源压测工具Trace-Replayer进行请求发送和性能指标记录，将工作负载中请求时间戳进行缩放，观察端到端TTFT Mean和TPOT Mean，以将负载请求速率调整到对应的系统服务能力上界。
+对于不同的调度策略，在相同工作负载缩放速率下对比TTFT Mean, TTFT P95, TPOT Mean和TPOT P95。
+
+端到端性能对比图如(TODO)所示，在图中观察到，对于(TODO!)工作负载，基于性能预测的调度策略相比于选取的简单指标混合策略有较明显的提升。
+
+\section{性能预测准确性(TODO: 准确性图、各自在不同workload下的指标、在各自状态下两种模拟器的决策热力图)}
+在本节中，本文比较了模拟器准确性对端到端
+
+\section{吞吐}
