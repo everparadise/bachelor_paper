@@ -6,17 +6,10 @@
 \chapter{实验评估}
 \label{ch:evaluation}
 
+
 本章通过端到端实验评估本文在线推理模拟器与预测驱动调度策略的有效性，并验证预测模块的在线可用性。
 实验重点围绕 PD 共置（Prefill/Decode colocation, mixed batch）场景展开：在该场景中 Prefill 与 Decode 在同一实例竞争资源，
 混合批的组成与节奏随时间变化，简单负载指标往往难以稳定刻画实例可服务能力，因此更需要在线预测信号辅助全局调度决策。
-本章主要回答以下问题：
-
-\begin{itemize}
-  \item \textbf{Q1：}基于在线模拟器预测的调度策略，相比简单指标调度能否改善端到端 TTFT（尤其尾延迟）与吞吐？
-  \item \textbf{Q2：}预测模块的吞吐与延迟是否满足在线调度需求？是否会成为调度关键路径瓶颈？
-  \item \textbf{Q3：}同步闭环与实现优化（pattern-level、prediction reuse）在系统中是否必要？它们带来怎样的收益？
-  \item \textbf{Q4（可选）：}跨预测表/跨模型查表时，预测信号的排序一致性如何？为何 mean 变化小但 tail 更敏感？
-\end{itemize}
 
 \section{实验设置}
 \label{sec:exp_setup}

@@ -27,8 +27,65 @@
 第三，执行过程不同。在线调度需要回答的是“如果把这个请求发过去会怎样”。
 这是反事实的执行过程，需要在当前已经发生的状态之上，叠加一个尚未发生的请求，
 向前模拟直到该请求产出首token。
-这要求模拟器具备“快照”能力：能够基于当前状态创建假设分支，
-在不影响真实状态的情况下执行模拟。
+这引出了性能预测模块模拟器的设计目标: 
+首先，模拟器的状态能够与推理实例的状态保持同步，以保证对请求的模拟预测能够准确。其次，由于请求不确定被调度到模拟的实例，因此预测过程中的状态演进不能影响真实状态，导致后续请求模拟受到干扰。
+最后，在预测时延上，由于性能预测过程处于在线服务场景全局调度的关键路径上，需要高效地完成预测，以保证高请求到达率下预测模块不会成为推理集群的性能瓶颈。
+在本章节中将详细分析在线性能预测模块的系统设计，重点介绍状态同步机制和状态演进管理的设计与实现。
+
+\section{架构与接口设计}
+
+推理服务集群和性能预测模块的架构如图(TODO!)所示，性能预测模块作为全局调度器的一个组件，提供在线性能预测服务。
+暴露三个接口，可以对Predict和AddRequest进行设计
+此外，讲解架构设计，全局调度器中包含模拟器模块，实例侧包含状态同步模块，二者通过RPC通信实现状态同步和预测查询。
+
+\texttt{predict}是核心预测接口。给定请求r和目标实例i，返回请求r如果发往实例i的预估TTFT。
+
+实现逻辑：
+\begin{itemize}
+  \item 获取实例i当前维护的预测状态（即上一次预测推进后的最新状态）。
+  \item 在预测状态上插入请求r，按照3.4节的演进规则向前模拟，直到r的prefill完成。
+  \item 累加各步的执行时间，返回总时间。
+  \item 将模拟过程中产生的中间状态（每一步推进后的batch pattern）压入预测状态栈，供后续请求复用。
+\end{itemize}
+
+由于调度器需要同时为多个实例进行预测，\texttt{predict}支持并发调用，内部实现无锁，利用Rust的异步运行时并行执行。
+
+\subsection{add\_request}
+
+\begin{verbatim}
+fn add_request(&self, req: &Request, instance_id: InstanceId)
+\end{verbatim}
+
+\texttt{add\_request}在调度器确认将请求r发往实例i后调用。这个接口的作用是更新模拟状态，让模拟状态“知道”请求r确实已经到达实例i。
+
+为什么需要这个接口？因为\texttt{predict}是反事实的——它预测“如果把请求发过去会怎样”，但请求可能最终没有被发往这个实例。\texttt{add\_request}负责将“反事实”变为“事实”：将请求r正式加入实例i的模拟状态队列。
+
+实现逻辑很简单：将请求r加入实例i的等待队列统计信息中。如果实例i的预测状态栈非空（即已经有一些预测推进），\texttt{add\_request}会将请求r加入最新状态，并从那里开始继续演进。
+
+\texttt{add\_request}与\texttt{predict}配合使用：先\texttt{predict}所有候选实例，选择最优目标，然后对选中的实例调用\texttt{add\_request}确认，对其他实例不做操作（它们的模拟状态保持不变）。
+
+\subsection{sync}
+
+\begin{verbatim}
+fn sync(&self, instance_id: InstanceId, state_delta: StateDelta) -> Result<()>
+\end{verbatim}
+
+\texttt{sync}由实例回调调用，用于将真实状态变更同步给调度器。\texttt{StateDelta}包含版本号和变更摘要，具体格式在3.2节已描述。
+
+实现逻辑：
+\begin{itemize}
+  \item 根据版本号判断同步信息的有效性。
+  \item 如果版本号连续，将变更摘要应用到模拟状态上。
+  \item 同时，将变更摘要与预测状态栈的栈顶进行比较：
+    \begin{itemize}
+      \item 如果栈顶状态与真实状态一致，弹出栈顶，预测状态与真实状态对齐。
+      \item 如果不一致，清空整个预测状态栈，将预测状态重置为真实状态。
+    \end{itemize}
+\end{itemize}
+
+\texttt{sync}是状态演进式预测能够长期保持有效性的关键。它确保预测不会偏离真实太远，一旦偏离就被及时纠正。
+
+
 
 \section{状态同步机制}
 
@@ -109,65 +166,3 @@ KVCache的变化(以vLLM为例，包括新分配的Block ID、对应的Hash和�
 (TODO 这里给出偏离情况，并讲解偏离时如何更新演进状态)
 
 这种设计将预测视为“提前执行”的模拟，而同步则负责在真实执行发生时进行校准。只要预测与真实的偏离不频繁，预测状态就能保持复用，保证预测的有效性。
-
-
-\section{语义与架构设计}
-
-在这一部分分析在线模拟器与离线模拟器的语义不同，暴露三个接口，可以对Predict和AddRequest进行设计
-此外，讲解架构设计，全局调度器中包含模拟器模块，实例侧包含状态同步模块，二者通过RPC通信实现状态同步和预测查询。
-
-\subsection{接口}
-
-\begin{verbatim}
-fn predict(&self, req: &Request, instance_id: InstanceId) -> Result<Duration>
-\end{verbatim}
-
-\texttt{predict}是核心预测接口。给定请求r和目标实例i，返回请求r如果发往实例i的预估TTFT。
-
-实现逻辑：
-\begin{itemize}
-  \item 获取实例i当前维护的预测状态（即上一次预测推进后的最新状态）。
-  \item 在预测状态上插入请求r，按照3.4节的演进规则向前模拟，直到r的prefill完成。
-  \item 累加各步的执行时间，返回总时间。
-  \item 将模拟过程中产生的中间状态（每一步推进后的batch pattern）压入预测状态栈，供后续请求复用。
-\end{itemize}
-
-由于调度器需要同时为多个实例进行预测，\texttt{predict}支持并发调用，内部实现无锁，利用Rust的异步运行时并行执行。
-
-\subsection{add\_request}
-
-\begin{verbatim}
-fn add_request(&self, req: &Request, instance_id: InstanceId)
-\end{verbatim}
-
-\texttt{add\_request}在调度器确认将请求r发往实例i后调用。这个接口的作用是更新模拟状态，让模拟状态“知道”请求r确实已经到达实例i。
-
-为什么需要这个接口？因为\texttt{predict}是反事实的——它预测“如果把请求发过去会怎样”，但请求可能最终没有被发往这个实例。\texttt{add\_request}负责将“反事实”变为“事实”：将请求r正式加入实例i的模拟状态队列。
-
-实现逻辑很简单：将请求r加入实例i的等待队列统计信息中。如果实例i的预测状态栈非空（即已经有一些预测推进），\texttt{add\_request}会将请求r加入最新状态，并从那里开始继续演进。
-
-\texttt{add\_request}与\texttt{predict}配合使用：先\texttt{predict}所有候选实例，选择最优目标，然后对选中的实例调用\texttt{add\_request}确认，对其他实例不做操作（它们的模拟状态保持不变）。
-
-\subsection{sync}
-
-\begin{verbatim}
-fn sync(&self, instance_id: InstanceId, state_delta: StateDelta) -> Result<()>
-\end{verbatim}
-
-\texttt{sync}由实例回调调用，用于将真实状态变更同步给调度器。\texttt{StateDelta}包含版本号和变更摘要，具体格式在3.2节已描述。
-
-实现逻辑：
-\begin{itemize}
-  \item 根据版本号判断同步信息的有效性。
-  \item 如果版本号连续，将变更摘要应用到模拟状态上。
-  \item 同时，将变更摘要与预测状态栈的栈顶进行比较：
-    \begin{itemize}
-      \item 如果栈顶状态与真实状态一致，弹出栈顶，预测状态与真实状态对齐。
-      \item 如果不一致，清空整个预测状态栈，将预测状态重置为真实状态。
-    \end{itemize}
-\end{itemize}
-
-\texttt{sync}是状态演进式预测能够长期保持有效性的关键。它确保预测不会偏离真实太远，一旦偏离就被及时纠正。
-
-
-下一章将通过端到端实验，验证本章设计在实际系统中的效果。
