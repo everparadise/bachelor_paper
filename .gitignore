@@ -36,3 +36,8 @@
 # OS junk
 .DS_Store
 Thumbs.db
+
+# data 下解压/解析出的目录
+data/*/
+# data 下 .tgz 归档超过 GitHub 100MB 限制，不纳入版本控制
+data/*.tgz
