@@ -6,95 +6,27 @@
 \chapter{实验评估}
 \label{ch:evaluation}
 
+本章通过端到端测试比较包含性能预测能力的调度策略与开源社区、学术界与工业界的调度策略在LLM推理服务中的性能表现，来总结本文性能预测模块对调度决策的提升。
+在Baseline选择上，本文选取了一些基于当前性能指标进行混合的策略，来展示对于简单性能指标的选择可能无法全面、准确刻画实例负载情况，与本文实现的性能预测模块得到预测性能指标的调度策略进行对比，展示基于性能预测的调度策略能够避免指标选取、参数调优的过程并且能够得到更优性能。
+为了能够排除系统实现、架构设计对于端到端性能的影响，本文在Rust实现的统一全局调度框架上来实现各种策略，该框架已通过严格的性能校准验证其正确性和高效性。并且每种策略的实现也进行了校准，以保证策略实现与其在原框架上的语义相同，性能不慢于原框架实现。
+* Company-X是世界最大的LLM服务提供商之一在生产环境中使用的策略，其采用简单的线性组合方式混合性能指标(TODO! 如图)。为了展示其最优效果，本文针对每个Workload通过实验将参数调优到了最佳性能。
+* vLLM是LLM推理服务中使用最广泛的框架，采用了基于请求数混合的线性组合负载均衡策略。
+* Dynamo是NVIDIA公布的推理框架，其调度策略同样基于线性组合，但是使用了与Company-X不同的性能指标，使用的两个性能指标是Prefill Token数和实例中的总Token数，调度器通过将请求指派到这两者混合得分最小的实例上，本文同样通过实验将参数调整到了最优配置。
+而基于性能预测的调度策略实现如下
+* Predictor使用本文实现的性能预测模块，预测得到请求在实例上执行完Prefill的时延，并选取时延最小的实例进行请求指派
 
-本章通过端到端实验评估本文在线推理模拟器与预测驱动调度策略的有效性，并验证预测模块的在线可用性。
-实验重点围绕 PD 共置（Prefill/Decode colocation, mixed batch）场景展开：在该场景中 Prefill 与 Decode 在同一实例竞争资源，
-混合批的组成与节奏随时间变化，简单负载指标往往难以稳定刻画实例可服务能力，因此更需要在线预测信号辅助全局调度决策。
-
-\section{实验设置}
-\label{sec:exp_setup}
-
-\subsection{硬件与软件环境}
-\label{sec:env}
-
-实验在两类 GPU 集群上进行（均为 8 卡单机或 8 卡同构节点配置，依据你的实际环境填写，TODO）：
-\begin{itemize}
-  \item \textbf{H20 集群：}8$\times$ NVIDIA H20，CPU/内存/网络配置（TODO）
-  \item \textbf{H100 集群：}8$\times$ NVIDIA H100，CPU/内存/网络配置（TODO）
-\end{itemize}
-
-推理运行时采用 vLLM（版本 TODO），部署形态为 PD 共置 mixed batch（即 Prefill 与 Decode 在同一实例中混合执行）。
-全局调度器与在线模拟器部署在调度节点（或与入口服务共置，TODO），候选实例预测采用并行方式执行（线程池/协程/进程池，TODO）。
-
-\subsection{模型与工作负载}
-\label{sec:workload}
-
-实验模型配置包括：
-\begin{itemize}
-  \item \textbf{Dense：}Qwen2.5-7B（TODO: 精确版本与量化/并行配置）
-  \item \textbf{MoE：}Qwen3-30B-A3B（TODO）
-  \item （可选探索）更大规模模型，如 Qwen3-235B（TODO: 若有则说明条件与限制）
-\end{itemize}
-
-工作负载覆盖对话、代码与智能体三类典型场景（来源与采集方式 TODO）：
+在实验配置上，本文选取8*H20的DGX节点作为测试环境。使用Qwen2.5-7B的Dense模型和Qwen3-30B-A3B的MoE模型，来验证对于不同架构的模型，本文的性能预测能力同样有效。实验使用PD共置的方式部署实例，模型独立部署在一个GPU上，因此得到了8实例的推理服务集群进行端到端请求重放。
+在工作负载选取上，使用全面、多样的开源负载来进行请求重放，具体选用的负载如下
 \begin{itemize}
   \item Qwen Chatbot trace（TODO）
   \item Qwen Coder trace（TODO）
   \item Qwen Agent / ToolAgent trace（TODO）
 \end{itemize}
 
-为模拟在线到达过程，我们使用两类到达模式（按你实际采用的方式保留其一或两者，TODO）：
-\begin{itemize}
-  \item \textbf{稳态到达：}近似固定速率或泊松过程
-  \item \textbf{突发到达：}burst（例如 ON/OFF 或短时间高峰注入）
-\end{itemize}
 
-\subsection{评价指标}
-\label{sec:metrics}
-
-本文主要评价指标为：
-\begin{itemize}
-  \item \textbf{端到端 TTFT：}mean / p95 / p99（必要）
-  \item \textbf{吞吐：}系统稳定吞吐（QPS）与有效完成请求数（必要）
-  \item \textbf{TTFT SLO 违约率（可选）：} $\Pr[\mathrm{TTFT}>\tau]$，其中 $\tau$ 为 TTFT 阈值（TODO）
-  \item \textbf{预测模块开销：}预测吞吐（predictions/sec 或 requests/sec）、预测延迟（mean/p95/p99）
-\end{itemize}
-
-\section{对比方法与实现版本}
-\label{sec:baselines}
-
-\subsection{调度策略对比}
-\label{sec:schedulers}
-
-我们对比以下全局调度策略（根据你实验实际选择保留，TODO）：
-
-\textbf{(1) 简单指标基线（Metric-based baseline）}：
-例如最短队列（queue length）、最小 backlog tokens、轮询（round-robin）等。
-该类策略不依赖在线预测模块，易实现但难刻画 mixed batch 场景的真实服务能力。
-
-\textbf{(2) 预测驱动策略（Predictive scheduling）}：
-本文方法。对每个候选实例调用在线模拟器得到 $\widehat{\mathrm{TTFT}}$（以及可选风险项），并据此选择最优实例。
-若本文实现为“预测 + 简单指标混合”，请给出 score 公式（TODO），并在实验中讨论混合权重敏感性（可选）。
-
-\textbf{(3) 系统/框架对比（可选）}：
-若你在实验中对比 vLLM-v1、NVIDIA Dynamo、llm-d 等系统的默认策略，请说明其版本与配置（TODO），并确保对比条件尽可能一致。
-
-\subsection{在线模拟器实现版本}
-\label{sec:sim_versions}
-
-为验证设计选择的必要性，本章使用第~\ref{ch:sim_impl}~章中的实现版本进行对比：
-\begin{itemize}
-  \item \textbf{V1：Full-fidelity reference}（用于开销归因，不作为端到端 baseline）
-  \item \textbf{V3：Lightweight w/o reuse}（KVCache 外包 + pattern-level scheduling）
-  \item \textbf{V2：Lightweight w/ reuse}（在 V3 基础上加入 prediction reuse，作为默认部署版本）
-\end{itemize}
-注：版本编号可按你实际工程定义调整（TODO）。
-
-\section{端到端结果：预测驱动调度的收益}
+\section{端到端性能比较}
 \label{sec:e2e_results}
 
-本节回答 Q1：预测驱动调度是否改善端到端服务质量？
-我们在不同模型、不同负载与不同硬件环境下对比调度策略，报告 TTFT 与吞吐的变化。
 
 \subsection{稳态负载下的 TTFT 与吞吐}
 \label{sec:steady}
@@ -106,19 +38,8 @@
 图~\ref{fig:e2e_tput} 展示了系统吞吐（QPS）对比（TODO: 补图/表）。
 预测驱动策略在不降低吞吐的前提下改善 TTFT，或在部分场景同时提升吞吐与 TTFT（取决于你的结果，TODO）。
 
-\subsection{突发负载下的尾延迟与稳定性}
-\label{sec:burst}
-
-PD 共置 mixed batch 对突发到达更敏感：短时间大量 prefill 请求会与 decode 运行集合竞争资源，
-导致 TTFT tail 放大。
-图~\ref{fig:e2e_burst} 展示 burst 场景下各策略的 TTFT tail 与（可选）SLO 违约率对比（TODO）。
-结果表明，预测驱动策略通过更准确地规避拥塞实例，能够降低突发下的 p99 与违约风险（TODO：用数据支撑）。
-
-
 \section{在线可用性：预测模块吞吐与延迟}
 \label{sec:online_budget}
-
-本节回答 Q2：预测模块是否满足在线调度需求？
 
 \subsection{预测吞吐与延迟统计}
 \label{sec:pred_perf}
@@ -211,11 +132,3 @@ prediction reuse 仍可显著降低预测延迟分位数（例如 p99），并�
 当系统处于拥塞区间或 mixed batch 的竞争更激烈时，
 不同预测表之间的绝对误差与排序误差更容易导致“边界实例”发生选择翻转，从而主要体现在 tail（p95/p99）差异上。
 这一现象提示：在 PD 共置场景中，预测表的可迁移性对均值可能更鲁棒，但对尾部质量仍需谨慎评估（TODO: 结合你的数据做出结论）。
-
-\section{本章小结}
-\label{sec:eval_summary}
-
-本章在 PD 共置 mixed batch 场景下验证了在线模拟器预测信号对全局调度的端到端收益，
-并评估了预测模块的在线可用性。
-实验结果表明：预测驱动调度能够在保持吞吐的同时改善 TTFT（尤其尾延迟），
-轻量在线模拟器满足在线开销预算；同步机制与 prediction reuse 等优化能够进一步提升系统的稳定性与可部署性（TODO: 用数据回扣结论）。
