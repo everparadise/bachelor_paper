@@ -7,128 +7,110 @@
 \label{ch:evaluation}
 
 本章通过端到端测试比较包含性能预测能力的调度策略与开源社区、学术界与工业界的调度策略在LLM推理服务中的性能表现，来总结本文性能预测模块对调度决策的提升。
-在Baseline选择上，本文选取了一些基于当前性能指标进行混合的策略，来展示对于简单性能指标的选择可能无法全面、准确刻画实例负载情况，与本文实现的性能预测模块得到预测性能指标的调度策略进行对比，展示基于性能预测的调度策略能够避免指标选取、参数调优的过程并且能够得到更优性能。
-为了能够排除系统实现、架构设计对于端到端性能的影响，本文在Rust实现的统一全局调度框架上来实现各种策略，该框架已通过严格的性能校准验证其正确性和高效性。并且每种策略的实现也进行了校准，以保证策略实现与其在原框架上的语义相同，性能不慢于原框架实现。
+比较策略: 在对比的策略上，本文选取了一些基于当前性能指标进行混合的策略，来展示对于简单性能指标的选择可能无法全面、准确刻画实例负载情况，与本文实现的性能预测模块得到预测性能指标的调度策略进行对比，展示基于性能预测的调度策略能够避免指标选取、参数调优的过程并且能够得到更优性能。
+为了能够排除系统实现、架构设计对于端到端性能的影响，本文在Rust实现的统一全局调度框架上来实现各种策略，该框架已通过严格的性能校准验证其正确性和高效性。并且每种策略的实现也进行了校准，以保证策略实现与其在原框架上的语义相同，性能不慢于原框架实现。每种策略的调度指标如下所述:
 * Company-X是世界最大的LLM服务提供商之一在生产环境中使用的策略，其采用简单的线性组合方式混合性能指标(TODO! 如图)。为了展示其最优效果，本文针对每个Workload通过实验将参数调优到了最佳性能。
 * vLLM是LLM推理服务中使用最广泛的框架，采用了基于请求数混合的线性组合负载均衡策略。
 * Dynamo是NVIDIA公布的推理框架，其调度策略同样基于线性组合，但是使用了与Company-X不同的性能指标，使用的两个性能指标是Prefill Token数和实例中的总Token数，调度器通过将请求指派到这两者混合得分最小的实例上，本文同样通过实验将参数调整到了最优配置。
 而基于性能预测的调度策略实现如下
 * Predictor使用本文实现的性能预测模块，预测得到请求在实例上执行完Prefill的时延，并选取时延最小的实例进行请求指派
 
-在实验配置上，本文选取8*H20的DGX节点作为测试环境。使用Qwen2.5-7B的Dense模型和Qwen3-30B-A3B的MoE模型，来验证对于不同架构的模型，本文的性能预测能力同样有效。实验使用PD共置的方式部署实例，模型独立部署在一个GPU上，因此得到了8实例的推理服务集群进行端到端请求重放。
-在工作负载选取上，使用全面、多样的开源负载来进行请求重放，具体选用的负载如下
-\begin{itemize}
-  \item Qwen Chatbot trace（TODO）
-  \item Qwen Coder trace（TODO）
-  \item Qwen Agent / ToolAgent trace（TODO）
-\end{itemize}
+硬件环境: 在实验配置上，本文选取8*H20的DGX节点作为本文测试使用的硬件环境，每个GPU拥有96GB显存。全局调度器、请求重放工具与所有模型实例共同部署在176 Intel(R) Xeon(R) CPU核心和1TB DRAM的CPU server。对于模型部署、推理实例，本文选用开源社区最活跃、完善的推理框架之一: vLLM-v1作为模型部署单元，使用Flashinfer作为Attention后端。
+实验使用PD共置的方式部署实例，每个GPU能够单独部署下文所述的模型，因此得到了8实例的推理服务集群进行端到端请求重放。
+模型: 本文选用不同架构的模型，包括Qwen2.5-7B(Dense架构)模型和Qwen3-30B-A3B(MoE架构)模型，这两者都是模型开源社区广泛使用的模型，用于验证对于不同架构的模型，本文的性能预测能力同样有效。
+工作负载: 本文使用全面、多样的开源负载来进行请求重放，覆盖不同LLM应用场景。每种负载的场景和特性如下:
+Qwen ChatBot收集自类似ChatGPT这样的AI对话应用
+Qwen Coder请求来自类似Copilot这样AI辅助编程的应用
+Qwen Agent收集自智能体对模型的API调用
+ToolAgent(Kimi)是来自Kimi的agent服务请求
+其中Qwen的工作负载声明来自单一的集群调度器，与本文的测试场景相同。
+
+由于工作负载收集的集群配置、服务模型、推理框架与本文的测试环境不同，因此系统服务能力、请求到达速率与本文的配置存在差异。
+在请求重放的测试中，使用开源的请求重放器Trace-Replayer，为了得到符合当前集群配置的负载，本文将工作负载的请求时间戳通过一定缩放比例进行缩放，通过在系统服务能力测试中比较不同缩放比例下Mean TTFT/TPOT与SLO违反请求数，
+将缩放比例调整至符合系统整体服务能力的区间，并针对每个工作负载的服务能力区间进行不同策略的端到端性能对比。
 
 
 \section{端到端性能比较}
 \label{sec:e2e_results}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{figures/e2e/e2e_fig.png}
+\caption{在不同工作负载和请求到达速率下，性能预测策略与基线策略在TTFT Mean, TTFT P99, TPOT Mean和TPOT P99性能指标上的性能对比}
+\label{fig:e2e_comparison}
+\end{figure}
 
-\subsection{稳态负载下的 TTFT 与吞吐}
-\label{sec:steady}
+图~\ref{fig:e2e_comparison} 展示了在每个工作负载的服务能力区间内，不同策略的 TTFT和TPOT（mean/p95/p99）对比结果（TODO: 补图）。
+总体上，预测TTFT驱动的策略在所有场景下都能够在TTFT指标上达到明显的提升，例如在(TODO!)负载下对比Company-X的策略能够带来(TODO!)的TTFT Mean提升和(TODO!)的TTFT P99提升，对比vLLM-v1的策略带来了(TODO!)的TTFT Mean提升和(TODO!)的TTFT P99提升。
+并且TTFT的提升并没有以牺牲过多TPOT性能为代价，相比于TPOT最佳的Company-X策略在(TODO!)负载下仅有(TODO!)的TPOT Mean降低和(TODO!)的TPOT P95的降低，但仍然明显高于Dynamo和vLLM的策略。
+这表明基于TTFT性能预测模块的调度策略能够大幅提高集群请求TTFT性能，并且一定程度上同时兼顾了TPOT。
 
-图~\ref{fig:e2e_ttft} 展示了在稳态到达下，各策略的 TTFT（mean/p95/p99）对比结果（TODO: 补图）。
-总体上，预测驱动策略在 PD 共置 mixed batch 场景下能够更准确地选择“更快获得可执行 prefill 机会”的实例，
-从而降低 TTFT，尤其在高负载时对 p95/p99 的改善更显著（TODO: 用你的数据填充结论）。
+这可能是因为在TTFT的预测过程中，预测表中对于执行时长的建模包含了Tokens和Decode请求数、KVCache数等影响TPOT性能的特征，相当于通过使用TTFT作为调度指标的参考，将TPOT与TTFT各影响因素进行了预混合，从而包含了负载均衡的因素。
+这种方式通过预测执行时长作为直接的调度得分，避免了人类专家显式组合各种调度指标的复杂性，并且在TPOT差距不明显下带来非常可观的TTFT收益。
 
-图~\ref{fig:e2e_tput} 展示了系统吞吐（QPS）对比（TODO: 补图/表）。
-预测驱动策略在不降低吞吐的前提下改善 TTFT，或在部分场景同时提升吞吐与 TTFT（取决于你的结果，TODO）。
 
-\section{在线可用性：预测模块吞吐与延迟}
-\label{sec:online_budget}
 
-\subsection{预测吞吐与延迟统计}
-\label{sec:pred_perf}
+\section{预测准确性}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{fig/accuracy/prediction_error.png}
+\caption{Qwen2.5-7B和Qwen3-30B-A3B模型预测TTFT与真实TTFT误差CDF对比}
+\label{fig:pred_accuracy}
+\end{figure}
+在这一小节中分析在上文的性能预测模块实现下，是否能够对到达请求在实例上的TTFT进行准确的预测。由于没有先知告知对于所有时刻下所有实例的预测TTFT和在对应状态全部实例上执行模型推理得到TTFT的对比，因此只能通过一些统计方式得到用于参考的预测误差情况。
+我们通过记录请求i在性能预测模块中的预测TTFT(Pred)\_i，当请求指派到实例之后记录指派的实例ID(j)以及真实TTFT(Real)，然后再预测TTFT中找到对应实例ID的预测结果TTFT(Pred)\_i\_j，与TTFT(Real)进行对比即可得到在对应状态下的预测误差。
+在一次端到端测试中可以得到预测误差的CDF图像，从而得到可参考的整体预测误差情况。
 
-我们测量预测模块的处理能力，包括：
-(1) 单次 \texttt{Predict} 的延迟（mean/p95/p99）；
-(2) 在并发请求到达下的预测吞吐（predictions/sec 或 requests/sec）；
-(3) 预测开销在调度关键路径中的占比（若可测，TODO）。
+通过上面的比较方式，我们对于Qwen2.5-7B模型和Qwen3-30B-A3B模型在(TODO!)工作负载的(TODO!)和(TODO!)请求到达速率下记录所有TTFT(Real)\_i与TTFT(Pred)\_i\_j并绘制CDF，如(TODO!)所示。
+对于Qwen2.5-7B模型对应执行环境下，预测CDF显示有(TODO!)的请求预测误差在(TODO!)以内，而对于MoE架构的Qwen3-30B-A3B模型，预测误差略大，(TODO!)的请求预测误差在(TODO!)以内。
+在分析预测误差产生来源的过程中，我们发现误差较大请求的误差来源往往来自分布式组件之间的特性。例如，请求在实例端的入队顺序与全局调度器维护的队列顺序不一致（由于并行分词导致的顺序翻转）或全局调度器对推理实例即将结束的此次批处理无感知导致模拟批处理次数差异，这类误差由分布式系统的不确定性导致。
+而预测误差较小的请求，则在处理顺序、批次构成上与预测一致，误差来源主要是通过查找预测表得到的执行时长与真实执行时长之间的差异，即预测器对批处理执行时长的建模不够精确。
 
-表~\ref{tab:pred_perf} 总结了预测模块性能（TODO: 填数值）。
-总体结果显示，轻量在线模拟器（pattern-level + runtime-assisted）能够在高并发下保持稳定吞吐，
-不会成为调度瓶颈（TODO: 结合你系统目标 QPS 说明）。
-
-\begin{table}[t]
-  \centering
-  \caption{预测模块在线性能（TODO：填入不同版本/不同硬件上的 QPS 与延迟）。}
-  \label{tab:pred_perf}
-  \begin{tabular}{lccc}
-    \toprule
-    设置 & 预测吞吐（/s） & p95 延迟（$\mu$s/ms） & p99 延迟（$\mu$s/ms） \\
-    \midrule
-    V1 Full-fidelity & TODO & TODO & TODO \\
-    V3 Lightweight w/o reuse & TODO & TODO & TODO \\
-    V2 Lightweight w/ reuse & TODO & TODO & TODO \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-\section{消融实验：同步机制与实现优化的必要性}
-\label{sec:ablation}
-
-本节回答 Q3：同步闭环与优化选择是否必要？
-考虑到本科毕设篇幅，本节提供两类低成本且与贡献紧密相关的消融实验；你可根据已有数据保留其中一类或两类。
-
-\subsection{同步闭环的必要性（建议保留）}
-\label{sec:sync_ablation}
-
-我们比较以下两种设置（TODO：根据实现情况调整）：
-\begin{itemize}
-  \item \textbf{Full-Sync：}每个 batch 完成后上报 \texttt{batch\_trace} 并修正 $S^{gt}$（默认）
-  \item \textbf{No-Sync：}禁用 \texttt{SyncBatchResult}，模拟器仅靠自身推进（或使用固定背景负载），观察漂移
-\end{itemize}
-
-图~\ref{fig:sync_drift} 展示预测误差或端到端 TTFT tail 随时间的变化（TODO）。
-结果通常表现为：No-Sync 会产生累积漂移，导致预测失真并损害调度收益；Full-Sync 能将漂移控制在可接受范围内。
-
-\subsection{prediction reuse 的影响（建议保留）}
-\label{sec:reuse_ablation}
-
-我们在相同调度策略与相同 workload 下，对比 Lightweight w/ reuse（V2）与 w/o reuse（V3）：
-尽管端到端吞吐可能受其他模块瓶颈限制而近似不变，
-prediction reuse 仍可显著降低预测延迟分位数（例如 p99），并减少预测侧 CPU 压力（若可测，TODO）。
-图~\ref{fig:reuse_latency} 给出了 V2 与 V3 的预测延迟对比（TODO），用于支持实现章节中的结论。
-
-\section{现象分析（可选）：跨预测表的排序一致性}
+对于MoE模型预测误差较大的原因可能是在当前的预测建模下，没有显式建模MoE层由于Token动态性导致的负载均衡问题。MoE模型在每层会动态选择专家，不同Token的专家路由结果不同，导致相同batch构成的执行时间波动较大，使得基于查找表的预测误差相应增大。
+分布式组件特性带来的较大误差往往难以避免，但是一个建模更好的预测方式理应得到更低的平均预测误差。
+\section{跨表迁移}
 \label{sec:crosstable}
 
-本节用于解释你已观察到的现象：使用不同模型/不同预测表进行调度，mean TTFT 变化不大，但 p95/p99 差异更明显。
-由于在线调度主要依赖“实例间相对优劣”的比较，而非绝对值精确，
-我们用 Spearman 秩相关系数衡量两张预测表在候选实例排序上的一致程度。
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{fig/accuracy/cross_table_e2e.png}
+\caption{Qwen3-30B-A3B模型下正常预测与跨表预测（使用Qwen2.5-7B预测表）的端到端测试TTFT/TPOT对比}
+\label{fig:crosstable_perf}
+\end{figure}
+模拟器对于一个有不同模型大小和硬件资源的部署进行支持需要重新进行离线性能剖析和预测，这对于存在大量服务模型、有不同硬件资源的LLM服务厂商而言可能需要花费很多精力以不断扩展新的模型和部署环境。
+但是模型的结构大致存在相似性，例如都存在Attention和MLP(MoE)这些组件，影响执行时间的因素也大致相同，只是在预测表中的映射执行时间的系数不同。
+对于离线模拟而言，模拟器的目的是提供集群吞吐和容量规划，这需要对执行时间的预测绝对准确。但是在调度场景中，预测得到的时间是通过比较来选出指派的目标实例，只需要能够对不同实例的预测结果体现相对负载情况即可。
+基于上述两个原因，在在线场景中不同模型的预测表可能存在迁移、复用的可能性，即使用与模型部署不同配置的性能预测表来指导调度决策。
+
+本小节尝试在端到端测试中使用与部署模型不同的模型预测表来指导调度决策，并比较分析是否存在上述跨表迁移的可能性。如图(TODO!)，我们在(TODO!)工作负载中部署Qwen3-30B-A3B，并在全局调度器中使用Qwen2.5-7B模型的预测表进行性能预测(后续称为跨表预测)，并比较端到端请求重放的TTFT与TPOT。
+实验结果表明，跨表迁移部署的TTFT Mean与正常部署相比仅低(TODO!),TPOT Mean低(TODO!)。TTFT P99和TPOT P99相差略大，但仍然分别只有(TODO!)的性能下降，但TTFT Mean相对于Company-X仍然有(TODO!)的性能提升，TPOT Mean慢(TODO!)
+这意味着即使模型的架构存在差异(Dense与MoE)，跨表迁移带来的性能下降并不明显，并且相对于对简单指标混合的策略仍然能带来TTFT的提升。
+
 
 \subsection{Spearman 秩相关与选择一致率}
 \label{sec:spearman}
 
-对于每个请求 $r$，我们记录候选实例集合 $\mathcal{I}$ 上两张预测表输出的实例评分序列 $\{s_A(r,i)\}$ 与 $\{s_B(r,i)\}$（本文默认 $s=\widehat{\mathrm{TTFT}}$）。
-将评分转为排序后计算 Spearman 相关系数 $\rho(r)$，并统计全体请求的平均/分位数（TODO: 公式可简述）。
+在这一小节我们进一步探索为什么存在上述跨表迁移的现象。我们在同一次请求重放测试中，同时使用跨表预测的模拟器和正确配置的模拟器进行性能预测，对于每个请求 $r$，记录候选实例集合 $\mathcal{I}$ 上使用两张预测表输出的性能指标 $\{TTFT_A(r,i)\}$ 与 $\{TTFT_B(r,i)\}$。
+将评分转为排序后计算两者 Spearman 相关系数 $\rho(r)$，并统计全体请求的平均/分位数（TODO: 公式可简述）。
 同时，我们计算两张预测表的 Top-1 选择一致率：
-\[
-\mathrm{Agree@1} = \frac{1}{|R|}\sum_{r\in R} \mathbb{1}\Big[\arg\min_i s_A(r,i) = \arg\min_i s_B(r,i)\Big]
-\]
-表~\ref{tab:crosstable} 给出统计结果（TODO）。
+在对(TODO!)工作负载的请求重放中发现，
+\section{在线可用性：预测模块吞吐与延迟}
+\label{sec:online_budget}
 
-\begin{table}[t]
-  \centering
-  \caption{跨预测表一致性分析（TODO：填 Spearman 与 Agree@1；可再给 tail 子集统计）。}
-  \label{tab:crosstable}
-  \begin{tabular}{lcc}
-    \toprule
-    指标 & 全体请求 & tail 子集（例如 TTFT top 10\%） \\
-    \midrule
-    Spearman $\rho$（均值/中位数） & TODO & TODO \\
-    Agree@1 & TODO & TODO \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.9\textwidth]{fig/scale/scalability.png}
+\caption{可扩展性测试中性能预测模块吞吐与集群服务能力随实例数扩展的对比（使用ChatBot工作负载）}
+\label{fig:scalability}
+\end{figure}
+在应用预测模块在调度场景中时，由于预测模块相比于直接混合基础指标的策略实现逻辑更为复杂，并且代码量更加庞大，因此可能担忧基于性能预测的方式是否能够用于大规模集群部署。
+在本章节通过对给定的集群规模对预测模块吞吐进行压力测试，来得到对应规模下的预测模块吞吐上界，与系统服务能力的扩展进行对比，从而能够得到预测模块吞吐低于系统服务能力的界限。
+由于硬件资源限制，我们无法在真实的8实例以上规模集群下进行测试，因此为了扩展集群规模，我们让每个物理实例对应全局调度器中多个逻辑实例，逻辑实例状态与物理实例完全同步，因此对于全局调度器可以视作在更大的集群规模下进行调度。
+在压力测试中，控制请求发送器不间断的向全局调度器发送请求，为保证推理实例不会被超载的请求击垮，我们控制每个逻辑实例的Token总数，如果新到达请求让逻辑实例Token数超出上限，则在调度结束后拒绝进行请求指派。
+通过上面的方式，我们在无法扩展物理硬件规模的情况下能够得到相近的调度吞吐。集群服务能力以(TODO!)负载在8实例下TPOT P99和TTFT P99不发生SLO违反为基础的QPS作为8实例集群服务能力上界，认为合理的调度逻辑能够让集群吞吐随集群规模线性扩展，因此得到不同实例数下的集群服务能力上界。
+得到如下的可扩展性对比图，对比不同实例下的预测模块吞吐与系统服务能力。
 
-\subsection{讨论：为何 tail 更敏感}
-\label{sec:tail_sensitive}
+总体结果显示，本文的在线模拟器在(TODO!)负载下，即使扩展到了(TODO!)实例数的集群规模，仍然能够用于在线服务，不会成为系统瓶颈。
 
-当系统处于拥塞区间或 mixed batch 的竞争更激烈时，
-不同预测表之间的绝对误差与排序误差更容易导致“边界实例”发生选择翻转，从而主要体现在 tail（p95/p99）差异上。
-这一现象提示：在 PD 共置场景中，预测表的可迁移性对均值可能更鲁棒，但对尾部质量仍需谨慎评估（TODO: 结合你的数据做出结论）。
+
+
