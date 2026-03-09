@@ -50,13 +50,13 @@ ToolAgent(Kimi)是来自Kimi的agent服务请求
 
 
 
-\section{预测准确性}
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.9\textwidth]{fig/accuracy/prediction_error.png}
-\caption{Qwen2.5-7B和Qwen3-30B-A3B模型预测TTFT与真实TTFT误差CDF对比}
-\label{fig:pred_accuracy}
-\end{figure}
+% \section{预测准确性}
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.9\textwidth]{figures/accuracy/prediction_error.png}
+% \caption{Qwen2.5-7B和Qwen3-30B-A3B模型预测TTFT与真实TTFT误差CDF对比}
+% \label{fig:pred_accuracy}
+% \end{figure}
 在这一小节中分析在上文的性能预测模块实现下，是否能够对到达请求在实例上的TTFT进行准确的预测。由于没有先知告知对于所有时刻下所有实例的预测TTFT和在对应状态全部实例上执行模型推理得到TTFT的对比，因此只能通过一些统计方式得到用于参考的预测误差情况。
 我们通过记录请求i在性能预测模块中的预测TTFT(Pred)\_i，当请求指派到实例之后记录指派的实例ID(j)以及真实TTFT(Real)，然后再预测TTFT中找到对应实例ID的预测结果TTFT(Pred)\_i\_j，与TTFT(Real)进行对比即可得到在对应状态下的预测误差。
 在一次端到端测试中可以得到预测误差的CDF图像，从而得到可参考的整体预测误差情况。
@@ -73,12 +73,12 @@ ToolAgent(Kimi)是来自Kimi的agent服务请求
 \section{跨表迁移}
 \label{sec:crosstable}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.9\textwidth]{fig/accuracy/cross_table_e2e.png}
-\caption{Qwen3-30B-A3B模型下正常预测与跨表预测（使用Qwen2.5-7B预测表）的端到端测试TTFT/TPOT对比}
-\label{fig:crosstable_perf}
-\end{figure}
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.9\textwidth]{fig/accuracy/cross_table_e2e.png}
+% \caption{Qwen3-30B-A3B模型下正常预测与跨表预测（使用Qwen2.5-7B预测表）的端到端测试TTFT/TPOT对比}
+% \label{fig:crosstable_perf}
+% \end{figure}
 模拟器对于一个有不同模型大小和硬件资源的部署进行支持需要重新进行离线性能剖析和预测，这对于存在大量服务模型、有不同硬件资源的LLM服务厂商而言可能需要花费很多精力以不断扩展新的模型和部署环境。
 但是模型的结构大致存在相似性，例如都存在Attention和MLP(MoE)这些组件，影响执行时间的因素也大致相同，只是在预测表中的映射执行时间的系数不同。
 对于离线模拟而言，模拟器的目的是提供集群吞吐和容量规划，这需要对执行时间的预测绝对准确。但是在调度场景中，预测得到的时间是通过比较来选出指派的目标实例，只需要能够对不同实例的预测结果体现相对负载情况即可。
@@ -99,12 +99,12 @@ ToolAgent(Kimi)是来自Kimi的agent服务请求
 \section{在线可用性：预测模块吞吐与延迟}
 \label{sec:online_budget}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.9\textwidth]{fig/scale/scalability.png}
-\caption{可扩展性测试中性能预测模块吞吐与集群服务能力随实例数扩展的对比（使用ChatBot工作负载）}
-\label{fig:scalability}
-\end{figure}
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.9\textwidth]{fig/scale/scalability.png}
+% \caption{可扩展性测试中性能预测模块吞吐与集群服务能力随实例数扩展的对比（使用ChatBot工作负载）}
+% \label{fig:scalability}
+% \end{figure}
 在应用预测模块在调度场景中时，由于预测模块相比于直接混合基础指标的策略实现逻辑更为复杂，并且代码量更加庞大，因此可能担忧基于性能预测的方式是否能够用于大规模集群部署。
 在本章节通过对给定的集群规模对预测模块吞吐进行压力测试，来得到对应规模下的预测模块吞吐上界，与系统服务能力的扩展进行对比，从而能够得到预测模块吞吐低于系统服务能力的界限。
 由于硬件资源限制，我们无法在真实的8实例以上规模集群下进行测试，因此为了扩展集群规模，我们让每个物理实例对应全局调度器中多个逻辑实例，逻辑实例状态与物理实例完全同步，因此对于全局调度器可以视作在更大的集群规模下进行调度。

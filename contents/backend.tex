@@ -106,12 +106,12 @@ SimAI采用重量级的网络模拟器来刻画集合通信的时延，能够建
 \label{fig:motiv_metrics_line}
 \end{figure}
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.9\textwidth]{figures/motivation/companyX_dynamo.png}
-\caption{Qwen2.5-7B在Qwen ChatBot工作负载下，不同λ参数选取时TTFT与TPOT性能对比}
-\label{fig:motiv_metrics_line}
-\end{figure}
+% \begin{figure}[t]
+% \centering
+% \includegraphics[width=0.9\textwidth]{figures/motivation/companyX_dynamo.png}
+% \caption{Qwen2.5-7B在Qwen ChatBot工作负载下，不同λ参数选取时TTFT与TPOT性能对比}
+% \label{fig:motiv_metrics_line_2}
+% \end{figure}
 
 \textbf{Company-X调参敏感性分析}为说明线性组合方法在混合指标时存在调整组合参数时存在局限性，参数的变化会带来性能的明显改变，我们在Chatbot 工作负载上改变Company-X的权重参数进行网格搜索的端到端实验。
 实验的硬件环境为8 × H20的服务器，使用模型为Qwen2.5-7B。权重参数λ从0.0变化至1.0（λ为Company-X策略中两种指标的贡献权重）。
