@@ -31,15 +31,14 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 # 数据根目录：脚本所在目录的父目录的父目录下的 data 目录（即项目根/data/）
 _data_dir = os.path.join(os.path.dirname(os.path.dirname(_script_dir)), "data")
 
-# 硬编码的目录名称（相对于数据根目录，需与 tgz 解压后的目录名一致，含 _e2e 后缀）
+# 硬编码的目录名称（相对于数据根目录）
 DEFAULT_ROOT_NAMES = [
-    
-    "20260224141339_moe_traceA_low_sc",
-    "20260224141339_moe_traceB_low_sc",
-    "20260224141339_moe_coder_low_sc",
+    "20260221234355_traceA_e2e",
+    "20260220235643_traceB_e2e",
+    "20260222184925_coder_e2e",
 ]
 DEFAULT_TIME_IN_SECS = 1200
-OUTPUT_FILENAME = "e2e_fig.png"
+OUTPUT_FILENAME = "e2e_dense_fig.png"  # 与 e2e_moe 区分，避免覆盖
 
 
 def resolve_and_extract(root_name: str) -> Optional[str]:
@@ -366,7 +365,7 @@ def output_metrics_table(results, output_path, p=PERCENTILE):
     输出不同策略在不同 Trace 上的性能指标表格。
     相同 Rate、相同 Trace 的不同策略放在一起，rate 取整到十分位。
     格式：Trace, strategy, rate, success_count, total_count, ttft_mean, ttft_p99, tpot_mean, tpot_p99
-    字段间用 \\t 分隔，便于比较观察。
+    字段间用 \\t 分隔，便于比较观察。同时输出到 TSV 文件和命令行。
     """
     base = output_path.rsplit(".", 1)[0] if "." in output_path else output_path
     tsv_path = base + "_metrics.tsv"
