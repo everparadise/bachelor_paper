@@ -94,7 +94,8 @@ LINE_STYLES = [
     ("o", "-"), ("s", "--"), ("^", "-."), ("x", ":"), ("D", "-"),
 ]
 
-PERCENTILE = 99
+# PERCENTILE = 99
+PERCENTILE = 95
 
 
 def time_formatter(x, pos):
