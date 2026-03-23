@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILENAME = "comparison.png"
 DETAIL_FILENAME = "ttft_error_details.csv"
+ERROR_RATIO_THRESHOLD = 0.3
 
 INPUT_DIRS = [
     "/nvme/lmetric/logs/lmmetric-logs/20260321223708_qwen25_fullargs_TraceB/sc3.1/join-shortest-q-ttft",
@@ -174,6 +175,20 @@ def load_one_series(root_dir):
     }
 
 
+def report_threshold_ratio(series_list, threshold):
+    """输出误差低于阈值的请求比例。"""
+    print(f"\n=== 误差阈值统计（|pred-real|/real < {threshold:.0%}） ===")
+    for series in series_list:
+        errors = series["error_ratios"]
+        qualified = int(np.sum(errors < threshold))
+        total = len(errors)
+        ratio = qualified / total if total else 0.0
+        print(
+            f"{series['label']}: {qualified}/{total} = {ratio:.2%} "
+            f"的请求预测误差小于 {threshold:.0%}"
+        )
+
+
 def save_detail_csv(series_list, output_dir):
     out_csv = os.path.join(output_dir, DETAIL_FILENAME)
     with open(out_csv, "w", encoding="utf-8") as f:
@@ -242,6 +257,7 @@ def main():
     output_dir = SCRIPT_DIR
     plot_error_cdf(series_list, output_dir)
     save_detail_csv(series_list, output_dir)
+    report_threshold_ratio(series_list, ERROR_RATIO_THRESHOLD)
 
 
 if __name__ == "__main__":
