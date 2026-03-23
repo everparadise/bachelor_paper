@@ -51,14 +51,14 @@
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.9\textwidth]{figures/e2e/e2e_new.png}
-\caption{部署Qwen3-30B-A3B模型在不同工作负载和请求到达速率下，性能预测策略与基线策略在TTFT Mean, TTFT P99, TPOT Mean和TPOT P99性能指标上的性能对比}
+\includegraphics[width=0.9\textwidth]{figures/e2e/e2e_new_fig.png}
+\caption{部署Qwen3-30B-A3B模型在不同工作负载和请求到达速率下，性能预测策略与基线策略在TTFT Mean, TTFT P95, TPOT Mean和TPOT P95性能指标上的性能对比}
 \label{fig:e2e_comparison}
 \end{figure}
 
-图~\ref{fig:e2e_comparison}展示了在各工作负载服务能力区间内，不同策略在TTFT和TPOT（mean/p95/p99）指标上的对比结果。
-总体上，基于TTFT预测的调度策略在所有场景下均能够明显改善TTFT。例如，在(TODO!)负载下，相比Company-X策略能够带来(TODO!)的TTFT Mean提升和(TODO!)的TTFT P99提升；相比vLLM-v1策略，则带来(TODO!)的TTFT Mean提升和(TODO!)的TTFT P99提升。
-更重要的是，这种TTFT收益并未以显著恶化TPOT为代价。与TPOT表现最优或接近最优的Company-X相比，Predictor在(TODO!)负载下仅带来(TODO!)的TPOT Mean下降和(TODO!)的TPOT P95下降，但整体表现仍明显优于Dynamo和vLLM。
+图~\ref{fig:e2e_comparison}展示了在各工作负载服务能力区间内，不同策略在TTFT和TPOT（mean/p95）指标上的对比结果。
+总体上，基于TTFT预测的调度策略在所有场景下均能够明显改善TTFT。例如，在Qwen ChatBot负载、22 QPS下，相比Company-X策略能够带来31.0\%的TTFT Mean提升和36.3\%的TTFT P95提升；相比vLLM-v1策略，则在Qwen Coder负载、7.5 QPS下带来24.0\%的TTFT Mean提升和10.7\%的TTFT P95提升。
+更重要的是，这种TTFT收益并未以显著恶化TPOT为代价。与TPOT表现最优或接近最优的Company-X相比，Predictor在Qwen Coder负载、7.5 QPS下仅带来4.4\%的TPOT Mean下降和3.1\%的TPOT P95下降，但整体表现仍明显优于Dynamo和vLLM。
 这表明，基于TTFT性能预测模块的调度策略不仅能够显著降低首token时延，还能够在一定程度上兼顾流式生成阶段的性能表现。
 
 造成这一结果的原因在于，本文预测的并非单一负载指标，而是请求在当前实例状态下的实际执行时长。该预测过程中已经隐式综合了Token数、Decode请求数、KVCache大小等多种影响因素。
