@@ -1,85 +1,142 @@
 ---
 name: prosec-thesis-structuring
-description: [TODO: Complete and informative explanation of what the skill does and when to use it. Include WHEN to use this skill - specific scenarios, file types, or tasks that trigger it.]
+description: Structure, diagnose, and rewrite thesis outlines and chapter logic with the PROSEC principle: Problem, Related Works, Observation, Solution, Evaluation, Conclusion. Use when Codex needs to design a new thesis structure, map an existing chapter layout to PROSEC, improve chapter ordering, identify missing argumentative links, or turn scattered research notes into a coherent paper narrative for undergraduate, master's, or systems-style technical writing.
 ---
 
 # Prosec Thesis Structuring
 
 ## Overview
 
-[TODO: 1-2 sentences explaining what this skill enables]
+Use this skill to turn a thesis topic, chapter list, draft, or notes into a coherent PROSEC narrative.
+Favor logical progression over template compliance: every section should answer why the next section must exist.
 
-## Structuring This Skill
+## Core Rule
 
-[TODO: Choose the structure that best fits this skill's purpose. Common patterns:
+Apply PROSEC as a reasoning chain:
 
-**1. Workflow-Based** (best for sequential processes)
-- Works well when there are clear step-by-step procedures
-- Example: DOCX skill with "Workflow Decision Tree" -> "Reading" -> "Creating" -> "Editing"
-- Structure: ## Overview -> ## Workflow Decision Tree -> ## Step 1 -> ## Step 2...
+- `Problem`: define the practical or scientific problem, stakes, and gap.
+- `Related Works`: explain what others have already done and where the gap remains.
+- `Observation`: state the key empirical or conceptual insight that motivates the new approach.
+- `Solution`: present the proposed method, system, model, or framework.
+- `Evaluation`: verify effectiveness, limits, and tradeoffs with evidence.
+- `Conclusion`: summarize findings, contributions, limitations, and future work.
 
-**2. Task-Based** (best for tool collections)
-- Works well when the skill offers different operations/capabilities
-- Example: PDF skill with "Quick Start" -> "Merge PDFs" -> "Split PDFs" -> "Extract Text"
-- Structure: ## Overview -> ## Quick Start -> ## Task Category 1 -> ## Task Category 2...
+Treat `Observation` as the bridge between "others have tried X" and "therefore this solution design is justified." Do not let it collapse into a vague motivation paragraph.
 
-**3. Reference/Guidelines** (best for standards or specifications)
-- Works well for brand guidelines, coding standards, or requirements
-- Example: Brand styling with "Brand Guidelines" -> "Colors" -> "Typography" -> "Features"
-- Structure: ## Overview -> ## Guidelines -> ## Specifications -> ## Usage...
+## Workflow
 
-**4. Capabilities-Based** (best for integrated systems)
-- Works well when the skill provides multiple interrelated features
-- Example: Product Management with "Core Capabilities" -> numbered capability list
-- Structure: ## Overview -> ## Core Capabilities -> ### 1. Feature -> ### 2. Feature...
+### 1. Read the user's material
 
-Patterns can be mixed and matched as needed. Most skills combine patterns (e.g., start with task-based, add workflow for complex operations).
+Start from the artifact the user already has:
 
-Delete this entire "Structuring This Skill" section when done - it's just guidance.]
+- thesis topic only
+- chapter list
+- section outline
+- partial draft
+- advisor feedback
+- raw notes or experiment results
 
-## [TODO: Replace with the first main section based on chosen structure]
+Infer the current narrative state before proposing changes.
 
-[TODO: Add content here. See examples in existing skills:
-- Code samples for technical skills
-- Decision trees for complex workflows
-- Concrete examples with realistic user requests
-- References to scripts/templates/references as needed]
+### 2. Diagnose the current PROSEC coverage
 
-## Resources (optional)
+For each PROSEC element, determine:
 
-Create only the resource directories this skill actually needs. Delete this section if no resources are required.
+- whether it exists
+- whether it is explicit or only implied
+- whether it is in the right place
+- whether it logically leads to the next element
 
-### scripts/
-Executable code (Python/Bash/etc.) that can be run directly to perform specific operations.
+Use a compact diagnosis table when the input is long:
 
-**Examples from other skills:**
-- PDF skill: `fill_fillable_fields.py`, `extract_form_field_info.py` - utilities for PDF manipulation
-- DOCX skill: `document.py`, `utilities.py` - Python modules for document processing
+| Element | Present? | Current location | Problem |
+| --- | --- | --- | --- |
+| Problem | yes/no | intro/ch1/etc. | too broad / missing stakes / no concrete gap |
+| Related Works | yes/no | background/ch2/etc. | only summary / no critique / no gap extraction |
+| Observation | yes/no | intro end/design start/etc. | missing / weak / unsupported |
+| Solution | yes/no | design/impl/etc. | mechanism unclear / no link to observation |
+| Evaluation | yes/no | eval/chapter x | no baseline / no explanation / weak metrics |
+| Conclusion | yes/no | summary/etc. | only recap / no limitation / no future work |
 
-**Appropriate for:** Python scripts, shell scripts, or any executable code that performs automation, data processing, or specific operations.
+### 3. Map the user's structure to PROSEC
 
-**Note:** Scripts may be executed without loading into context, but can still be read by Codex for patching or environment adjustments.
+When the user already has fixed thesis chapters, preserve the local chaptering style but realign the logic.
 
-### references/
-Documentation and reference material intended to be loaded into context to inform Codex's process and thinking.
+Use these common mappings:
 
-**Examples from other skills:**
-- Product management: `communication.md`, `context_building.md` - detailed workflow guides
-- BigQuery: API reference documentation and query examples
-- Finance: Schema documentation, company policies
+- six-chapter engineering thesis:
+  `intro -> Problem`, `background/backend -> Related Works`, `design -> Observation + Solution`, `implementation -> Solution realization`, `evaluation -> Evaluation`, `summary -> Conclusion`
+- paper-style structure:
+  `introduction -> Problem + contributions`, `related work -> Related Works`, `motivation/preliminary -> Observation`, `method -> Solution`, `experiments -> Evaluation`, `conclusion -> Conclusion`
+- mixed draft with no clear structure:
+  reorder sections by argumentative dependency, not by writing order
 
-**Appropriate for:** In-depth documentation, API references, database schemas, comprehensive guides, or any detailed information that Codex should reference while working.
+If `Observation` is too small for a standalone chapter, place it at the end of the introduction or at the beginning of the design chapter, but keep it explicit.
 
-### assets/
-Files not intended to be loaded into context, but rather used within the output Codex produces.
+### 4. Produce a rewrite plan
 
-**Examples from other skills:**
-- Brand styling: PowerPoint template files (.pptx), logo files
-- Frontend builder: HTML/React boilerplate project directories
-- Typography: Font files (.ttf, .woff2)
+Output one of these, depending on the request:
 
-**Appropriate for:** Templates, boilerplate code, document templates, images, icons, fonts, or any files meant to be copied or used in the final output.
+- a PROSEC-aligned chapter outline
+- a chapter-to-PROSEC mapping
+- a section rewrite plan
+- a gap list with concrete fixes
+- a transition plan that explains how one chapter should lead into the next
 
----
+Prefer actionable phrasing such as:
 
-**Not every skill requires all three types of resources.**
+- "End Chapter 2 by extracting the unresolved scheduling gap."
+- "Start Chapter 3 with the observation that prediction features are reusable across scheduling states."
+- "Move implementation details out of the design chapter unless they justify the mechanism."
+
+## Writing Guidance
+
+Apply these constraints when drafting or revising:
+
+- Make `Problem` concrete: name the scenario, cost, or system bottleneck.
+- Make `Related Works` comparative: do not list papers without extracting insufficiency.
+- Make `Observation` evidence-based: derive it from measurement, system behavior, or pattern analysis.
+- Make `Solution` responsive: every major mechanism should answer a specific problem or observation.
+- Make `Evaluation` argumentative: report not only results but also why they support the claim.
+- Make `Conclusion` bounded: summarize contributions and admit limits.
+
+Avoid these failure modes:
+
+- background inflation with no gap
+- related work as literature summary only
+- design chapter that starts before the motivating observation is clear
+- evaluation with metrics but no hypothesis
+- conclusion that repeats chapter summaries without synthesizing findings
+
+## Output Pattern
+
+When the user asks for restructuring help, prefer this response shape:
+
+1. State the current structural diagnosis in 2-6 lines.
+2. Show the target PROSEC mapping.
+3. Give a revised outline or chapter responsibilities.
+4. List missing links, if any.
+5. Provide transition sentences or section goals when useful.
+
+Use concise, directive language. Focus on narrative logic, not ornamental academic phrasing.
+
+## Example Triggers
+
+This skill should handle requests like:
+
+- "Use PROSEC to reorganize my thesis outline."
+- "Map my six thesis chapters to Problem, Related Works, Observation, Solution, Evaluation, Conclusion."
+- "My draft has background and design, but the logic feels disconnected. Diagnose it with PROSEC."
+- "Turn these research notes into a thesis structure."
+- "Where should Observation appear in a Chinese undergraduate engineering thesis?"
+
+## Self-Check
+
+Before finalizing a PROSEC-based rewrite, verify:
+
+- the problem statement leads to a concrete unresolved gap
+- related work ends with a limitation that motivates the thesis
+- observation is explicit and design-relevant
+- the solution answers the diagnosed gap instead of introducing unrelated mechanisms
+- evaluation tests the main claim with appropriate baselines or comparisons
+- the conclusion reflects actual findings rather than generic claims
