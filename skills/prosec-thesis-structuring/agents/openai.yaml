@@ -1,0 +1,4 @@
+interface:
+  display_name: "PROSEC Thesis Structuring"
+  short_description: "Guide PROSEC-based thesis structure design"
+  default_prompt: "Use $prosec-thesis-structuring to design or revise a thesis outline with the PROSEC structure."

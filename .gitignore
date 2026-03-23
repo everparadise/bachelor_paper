@@ -39,3 +39,5 @@ Thumbs.db
 
 # data 下解压/解析出的目录
 data/*/
+
+checkpoint*
