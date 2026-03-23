@@ -39,10 +39,12 @@ OUTPUT_DIR_PATH = [
     "20260309140449_moe_traceB_dynamo",
     "20260309195244_moe_coder_bailian",
     "20260309195244_moe_traceA_bailian",
-    "20260309195244_moe_traceB_bailian",
+    # "20260309195244_moe_traceB_bailian",
+    "20260321223708_moe_traceB_bailian",
     "20260311120407_moe_traceA_vllm",
     "20260312003413_moe_coder_vllm",
     "20260312003413_moe_traceB_vllm",
+    "20260321223708_qwen25_fullargs_TraceB"
 ]
 
 TRACEA_RATE = 5.0
@@ -55,9 +57,17 @@ WORKLOAD_DISPLAY_NAMES = {
     "tracea": "Chatbot",
     "traceB": "Agent",
     "traceb": "Agent",
+    "traceB_qwen25_7b": "Agent(7B)",
     "coder": "Coder",
     "Coder": "Coder",
 }
+
+WORKLOAD_PLOT_ORDER = [
+    "traceA",
+    "traceB",
+    "coder",
+    "traceB_qwen25_7b",
+]
 
 # 策略名称映射（目录中的策略名 -> 显示名）
 STRATEGY_DISPLAY_NAMES = {
@@ -71,7 +81,8 @@ STRATEGY_DISPLAY_NAMES = {
 # 可在此修改映射，支持 traceA/traceB/coder 等
 WORKLOAD_SC_TO_RATE = {
     "traceA": {"3.6": 3.6 * TRACEA_RATE, "3.8": 3.8 * TRACEA_RATE, "4.0": 4.0 * TRACEA_RATE, "4.2": 4.2 * TRACEA_RATE, "4.4": 4.4 * TRACEA_RATE, "4.6": 4.6 * TRACEA_RATE},
-    "traceB": {"3.1": 3.1 * TRACEB_RATE, "3.4": 3.4 * TRACEB_RATE, "3.7": 3.7 * TRACEB_RATE, "4.0": 4.0 * TRACEB_RATE, "4.3": 4.3 * TRACEB_RATE},
+    "traceB": {"1.9": 1.9 * TRACEB_RATE, "2.2": 2.2 * TRACEB_RATE, "2.5": 2.5 * TRACEB_RATE, "2.8": 2.8 * TRACEB_RATE, "3.1": 3.1 * TRACEB_RATE, "3.4": 3.4 * TRACEB_RATE, "3.7": 3.7 * TRACEB_RATE, "4.0": 4.0 * TRACEB_RATE, "4.3": 4.3 * TRACEB_RATE},
+    "traceB_qwen25_7b": {"1.9": 1.9 * TRACEB_RATE, "2.2": 2.2 * TRACEB_RATE, "2.5": 2.5 * TRACEB_RATE, "2.8": 2.8 * TRACEB_RATE, "3.1": 3.1 * TRACEB_RATE, "3.4": 3.4 * TRACEB_RATE, "3.7": 3.7 * TRACEB_RATE, "4.0": 4.0 * TRACEB_RATE, "4.3": 4.3 * TRACEB_RATE},
     "coder": {"0.9": 0.9 * CODER_RATE, "1.1": 1.1 * CODER_RATE, "1.3": 1.3 * CODER_RATE, "1.5": 1.5 * CODER_RATE, "1.7": 1.7 * CODER_RATE},
 }
 
@@ -207,12 +218,15 @@ def parse_jsonl_file(file_path, p=PERCENTILE):
 def extract_workload_from_dirname(dir_name):
     """从目录名提取 workload，匹配 traceA/traceB/coder 等"""
     base = dir_name
+    base_lower = base.lower()
+    if "qwen25" in base_lower and "traceb" in base_lower:
+        return "traceB_qwen25_7b"
     for kw, canonical in [
         ("tracea", "traceA"),
         ("traceb", "traceB"),
         ("coder", "coder"),
     ]:
-        if kw in base.lower():
+        if kw in base_lower:
             return canonical
     return dir_name
 
@@ -357,7 +371,11 @@ def plot_comparison(results, output_path, p=PERCENTILE):
     plt.rcParams["font.size"] = fontsize
     plt.rcParams["lines.markersize"] = marker_sz
 
-    workloads = sorted(set(r["workload"] for r in results))
+    workload_order_index = {name: idx for idx, name in enumerate(WORKLOAD_PLOT_ORDER)}
+    workloads = sorted(
+        set(r["workload"] for r in results),
+        key=lambda w: (workload_order_index.get(w, len(WORKLOAD_PLOT_ORDER)), w),
+    )
     strategies = sorted(set(r["strategy"] for r in results))
 
     n_workloads = len(workloads)
@@ -402,7 +420,7 @@ def plot_comparison(results, output_path, p=PERCENTILE):
         axes.append(row_axes)
 
         ax_label = axes[row_idx][0]
-        workload_display = WORKLOAD_DISPLAY_NAMES.get(workload, workload) + " (Qwen)"
+        workload_display = WORKLOAD_DISPLAY_NAMES.get(workload, workload)
         ax_label.text(0.83, 0.5, workload_display, transform=ax_label.transAxes,
                      fontsize=fontsize - 1, va="center", ha="center", rotation=90)
         ax_label.axis("off")
